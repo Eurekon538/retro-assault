@@ -8,15 +8,29 @@ No build step. Open `index.html` directly in a browser — double-click the file
 
 ## Git workflow
 
-After every meaningful change, commit with a descriptive message and push to `origin/master`:
+**Commit and push after every meaningful change** — never leave work uncommitted. This ensures we can always revert to a known-good state.
+
+Commit message format:
+- `feat: <what was added>` — new feature or gameplay element
+- `fix: <what was broken>` — bug fix
+- `docs: <what was documented>` — CLAUDE.md or comments
+- `refactor: <what changed>` — code restructure without behavior change
 
 ```powershell
-git -C "E:\AI-Projekte\ClaudeTest" add index.html
-git -C "E:\AI-Projekte\ClaudeTest" commit -m "feat: ..."
-& "C:\Program Files\GitHub CLI\gh.exe" ...   # if GitHub ops needed
+cd "E:\AI-Projekte\ClaudeTest"
+git add index.html        # or CLAUDE.md, etc.
+git commit -m "feat: add boss enemy with charge attack"
+git push
 ```
 
-Remote: https://github.com/Eurekon538/retro-assault
+When to commit:
+- After adding a new feature (enemy type, power-up, level, mechanic)
+- After fixing a bug
+- Before starting a large refactor (snapshot of working state)
+- After a refactor is confirmed working
+
+Remote: https://github.com/Eurekon538/retro-assault  
+Push with: `git push` (branch `master` already tracks `origin/master`)
 
 ## Architecture
 
