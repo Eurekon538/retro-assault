@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RETRO ASSAULT</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; display: flex; justify-content: center; align-items: center;
+           height: 100vh; overflow: hidden; }
+    canvas { display: block; image-rendering: pixelated; cursor: none; }
+  </style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
+// ============================================================
+// SECTION 1: CONSTANTS & LEVEL DATA
+// ============================================================
+
+const GW = 800;
+const GH = 600;
+const BASE_SPEED    = 200;
+const BULLET_SPEED  = 540;
+const BASE_FIRE_CD  = 130;
+
+const COLORS = {
+  floor: 0x1a1a2e, floorLine: 0x22224a,
+  player: 0x44ff66, playerDark: 0x228833,
+  gun: 0xdddddd,
+  bullet: 0xffff00, bulletCore: 0xffffff,
+  grunt: 0xff3333, gruntDark: 0xaa1111,
+  fast:  0xffdd00, fastDark:  0xaa8800,
+  tank:  0xaa44ff, tankDark:  0x661199,
+  heart: 0xff4466, heartEmpty: 0x442233,
+};
+
+const ECFG = {
+  grunt: { speed:80,  hp:1, score:10, sz:24, col:COLORS.grunt, dark:COLORS.gruntDark, shape:'square'  },
+  fast:  { speed:145, hp:1, score:15, sz:18, col:COLORS.fast,  dark:COLORS.fastDark,  shape:'diamond' },
+  tank:  { speed:50,  hp:3, score:30, sz:36, col:COLORS.tank,  dark:COLORS.tankDark,  shape:'circle'  },
+};
+
+// Power-up configs: key, display color, glow color, effect duration (ms, 0=instant/one-hit)
+const PUCFG = {
+  health: { label:'+ HP',  col:0x44ff88, glow:0x88ffaa, dur:0    },
+  speed:  { label:'SPEED', col:0x00ddff, glow:0x88eeff, dur:7000 },
+  rapid:  { label:'RAPID', col:0xffcc00, glow:0xffee88, dur:7000 },
+  shield: { label:'SHIELD',col:0x4488ff, glow:0x88aaff, dur:0    },
+};
+
+const LEVELS = [
+  { enemies:[{t:'grunt',n:10}],                               ivl:2000, alert:'LEVEL 1'         },
+  { enemies:[{t:'grunt',n:15},{t:'fast',n:5}],                ivl:1800, alert:'FAST ENEMY!'     },
+  { enemies:[{t:'grunt',n:20},{t:'fast',n:10}],               ivl:1500, alert:'LEVEL 3'         },
+  { enemies:[{t:'grunt',n:15},{t:'fast',n:10},{t:'tank',n:5}],ivl:1300, alert:'TANKS INCOMING!' },
+  { enemies:[{t:'grunt',n:20},{t:'fast',n:15},{t:'tank',n:10}],ivl:1000,alert:'FINAL WAVE!'     },
+];
+
+// ============================================================
+// SECTION 2: SPRITE GENERATION
+// ============================================================
+
+function genPlayer(scene) {
+  const g = scene.add.graphics();
+  for (let f = 0; f < 4; f++) {
+    const ox  = f * 32;
+    const leg = [0,3,0,-3][f];
+    g.fillStyle(0x000000, 0.3);  g.fillEllipse(ox+16,27,18,7);
+    g.fillStyle(COLORS.playerDark,1); g.fillCircle(ox+16,14,11);
+    g.fillStyle(COLORS.player,1);     g.fillCircle(ox+16,13,9);
+    g.fillStyle(COLORS.playerDark,1);
+    g.fillRect(ox+10,21,5,7+leg); g.fillRect(ox+17,21,5,7-leg);
+    g.fillStyle(COLORS.gun,1);
+    g.fillRect(ox+19,11,12,4); g.fillRect(ox+29,10,4,6);
+    g.fillStyle(0x88ffaa,1); g.fillCircle(ox+13,10,4);
+  }
+  g.generateTexture('player',128,32); g.destroy();
+  const tx = scene.textures.get('player');
+  for (let i=0;i<4;i++) tx.add(i,0,i*32,0,32,32);
+}
+
+function genEnemies(scene) {
+  Object.entries(ECFG).forEach(([type,c]) => {
+    const s = c.sz, g = scene.add.graphics();
+    for (let f=0;f<2;f++) {
+      const ox=f*s, bob=f*2;
+      if (c.shape==='square') {
+        g.fillStyle(c.dark,1); g.fillRect(ox+2,4+bob,s-4,s-6);
+        g.fillStyle(c.col,1);  g.fillRect(ox+3,3+bob,s-6,s-8);
+        g.fillStyle(0x000000,1);
+        g.fillRect(ox+5,7+bob,4,4); g.fillRect(ox+s-9,7+bob,4,4);
+        g.fillStyle(0xffffff,1);
+        g.fillRect(ox+6,8+bob,2,2); g.fillRect(ox+s-8,8+bob,2,2);
+      } else if (c.shape==='diamond') {
+        const cx=ox+s/2, cy=s/2;
+        g.fillStyle(c.dark,1);
+        g.fillPoints([{x:cx,y:2+bob},{x:ox+s-2,y:cy+bob},{x:cx,y:s-2+bob},{x:ox+2,y:cy+bob}],true);
+        g.fillStyle(c.col,1);
+        g.fillPoints([{x:cx,y:5+bob},{x:ox+s-5,y:cy+bob},{x:cx,y:s-4+bob},{x:ox+5,y:cy+bob}],true);
+        g.fillStyle(0x000000,1); g.fillCircle(cx,cy+bob,3);
+        g.fillStyle(0xffffff,1); g.fillCircle(cx+1,cy-1+bob,1.5);
+      } else {
+        const cx=ox+s/2, cy=s/2;
+        g.fillStyle(c.dark,1); g.fillCircle(cx,cy+bob,s/2-1);
+        g.fillStyle(c.col,1);  g.fillCircle(cx,cy-1+bob,s/2-3);
+        g.lineStyle(2,c.dark,1); g.strokeCircle(cx,cy-1+bob,s/2-7);
+        g.fillStyle(0x000000,1);
+        g.fillRect(cx-7,cy-4+bob,5,5); g.fillRect(cx+2,cy-4+bob,5,5);
+        g.fillStyle(0xff0000,1);
+        g.fillRect(cx-6,cy-3+bob,3,3); g.fillRect(cx+3,cy-3+bob,3,3);
+      }
+    }
+    g.generateTexture('e_'+type,s*2,s); g.destroy();
+    const tx=scene.textures.get('e_'+type);
+    tx.add(0,0,0,0,s,s); tx.add(1,0,s,0,s,s);
+  });
+}
+
+function genBullet(scene) {
+  let g=scene.add.graphics();
+  g.fillStyle(COLORS.bullet,1);    g.fillCircle(4,4,4);
+  g.fillStyle(COLORS.bulletCore,1);g.fillCircle(4,4,2);
+  g.generateTexture('bullet',8,8); g.destroy();
+
+  g=scene.add.graphics(); g.fillStyle(0xffff88,1); g.fillRect(0,0,4,4);
+  g.generateTexture('p_spark',4,4); g.destroy();
+  g=scene.add.graphics(); g.fillStyle(0x882222,1); g.fillRect(0,0,4,4);
+  g.generateTexture('p_blood',4,4); g.destroy();
+  g=scene.add.graphics(); g.fillStyle(0xffffff,0.9); g.fillRect(0,0,4,4);
+  g.generateTexture('p_white',4,4); g.destroy();
+}
+
+function genHeart(scene) {
+  let g=scene.add.graphics();
+  g.fillStyle(COLORS.heart,1);
+  g.fillCircle(6,5,5); g.fillCircle(14,5,5); g.fillTriangle(1,7,19,7,10,18);
+  g.generateTexture('heart_f',20,20); g.clear();
+  g.fillStyle(COLORS.heartEmpty,1);
+  g.fillCircle(6,5,5); g.fillCircle(14,5,5); g.fillTriangle(1,7,19,7,10,18);
+  g.generateTexture('heart_e',20,20); g.destroy();
+}
+
+function genFloor(scene) {
+  const g=scene.add.graphics();
+  g.fillStyle(COLORS.floor,1); g.fillRect(0,0,32,32);
+  g.lineStyle(1,COLORS.floorLine,0.5); g.strokeRect(0,0,32,32);
+  g.generateTexture('floor',32,32); g.destroy();
+}
+
+function genCrosshair(scene) {
+  const g=scene.add.graphics();
+  g.lineStyle(2,0x00ff88,0.9);
+  g.strokeCircle(12,12,10);
+  g.lineBetween(12,0,12,7); g.lineBetween(12,17,12,24);
+  g.lineBetween(0,12,7,12); g.lineBetween(17,12,24,12);
+  g.generateTexture('crosshair',24,24); g.destroy();
+}
+
+// Power-up sprite: spinning gem shape, 24×24, colored per type
+function genPowerUps(scene) {
+  Object.entries(PUCFG).forEach(([type,c]) => {
+    const g=scene.add.graphics();
+    // Outer glow ring
+    g.fillStyle(c.glow,0.3); g.fillCircle(12,12,12);
+    // Inner diamond
+    g.fillStyle(c.col,1);
+    g.fillPoints([{x:12,y:2},{x:22,y:12},{x:12,y:22},{x:2,y:12}],true);
+    // Darker inner diamond
+    g.fillStyle(0x000000,0.25);
+    g.fillPoints([{x:12,y:6},{x:18,y:12},{x:12,y:18},{x:6,y:12}],true);
+    // Shine
+    g.fillStyle(0xffffff,0.6); g.fillCircle(8,7,3);
+    // Letter overlay drawn as pixel segments
+    g.fillStyle(0x000000,0.7); g.fillRect(10,10,4,4);
+    g.generateTexture('pu_'+type,24,24); g.destroy();
+  });
+}
+
+// ============================================================
+// SECTION 3: BootScene
+// ============================================================
+
+class BootScene extends Phaser.Scene {
+  constructor() { super('BootScene'); }
+  create() {
+    genPlayer(this); genEnemies(this); genBullet(this);
+    genHeart(this);  genFloor(this);   genCrosshair(this);
+    genPowerUps(this);
+    this.scene.start('MenuScene');
+  }
+}
+
+// ============================================================
+// SECTION 4: MenuScene
+// ============================================================
+
+class MenuScene extends Phaser.Scene {
+  constructor() { super('MenuScene'); }
+
+  create() {
+    for (let x=0;x<GW;x+=32) for (let y=0;y<GH;y+=32) this.add.image(x+16,y+16,'floor');
+    this.add.rectangle(GW/2,GH/2,GW,GH,0x000000,0.72);
+
+    this.floaters=[];
+    const types=['grunt','fast','tank'];
+    for (let i=0;i<9;i++) {
+      const t=types[i%3];
+      const e=this.add.sprite(Phaser.Math.Between(60,GW-60),Phaser.Math.Between(60,GH-60),'e_'+t,0);
+      e.setAlpha(0.13).setScale(1.6);
+      e.vx=Phaser.Math.FloatBetween(-25,25); e.vy=Phaser.Math.FloatBetween(-25,25);
+      this.floaters.push(e);
+    }
+
+    this.add.text(GW/2,120,'RETRO',{fontSize:'88px',fontFamily:'monospace',color:'#44ff66',stroke:'#000',strokeThickness:7}).setOrigin(0.5);
+    this.add.text(GW/2,210,'ASSAULT',{fontSize:'88px',fontFamily:'monospace',color:'#ff4444',stroke:'#000',strokeThickness:7}).setOrigin(0.5);
+    this.add.text(GW/2,302,'Arrow keys / WASD to move  ·  Mouse to aim  ·  Click to shoot',{fontSize:'13px',fontFamily:'monospace',color:'#888888'}).setOrigin(0.5);
+    this.add.text(GW/2,320,'Power-Ups appear from Level 2 onward!',{fontSize:'12px',fontFamily:'monospace',color:'#666666'}).setOrigin(0.5);
+
+    const bb=this.add.rectangle(GW/2,375,230,52,0x224422).setInteractive({useHandCursor:true});
+    const bt=this.add.text(GW/2,375,'[ START GAME ]',{fontSize:'23px',fontFamily:'monospace',color:'#44ff66'}).setOrigin(0.5);
+    bb.on('pointerover',()=>{bb.setFillStyle(0x336633);bt.setColor('#88ffaa');});
+    bb.on('pointerout', ()=>{bb.setFillStyle(0x224422);bt.setColor('#44ff66');});
+    bb.on('pointerdown',()=>this.go());
+
+    const best=localStorage.getItem('raHigh')||0;
+    this.add.text(GW/2,440,`BEST SCORE: ${best}`,{fontSize:'16px',fontFamily:'monospace',color:'#ffdd44'}).setOrigin(0.5);
+    this.add.text(GW/2,476,'Press SPACE or ENTER to start',{fontSize:'13px',fontFamily:'monospace',color:'#555555'}).setOrigin(0.5);
+
+    this.tweens.add({targets:bt,alpha:0.35,duration:700,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
+    this.input.keyboard.on('keydown-SPACE',()=>this.go());
+    this.input.keyboard.on('keydown-ENTER',()=>this.go());
+    this.ft=0;
+  }
+
+  go() {
+    this.cameras.main.fadeOut(400,0,0,0);
+    this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('GameScene',{level:0,score:0,playerHP:5}));
+  }
+
+  update(_t,dt) {
+    this.ft+=dt;
+    this.floaters.forEach((e,i)=>{
+      e.x+=e.vx*dt/1000; e.y+=e.vy*dt/1000;
+      if(e.x<30||e.x>GW-30)e.vx*=-1;
+      if(e.y<30||e.y>GH-30)e.vy*=-1;
+      e.setFrame(Math.floor(this.ft/350)%2);
+      e.rotation+=0.0008*(i%2?1:-1);
+    });
+  }
+}
+
+// ============================================================
+// SECTION 5: GameScene
+// ============================================================
+
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  init(data) {
+    this.lvlIdx   = data.level    || 0;
+    this.score    = data.score    || 0;
+    this.playerHP = data.playerHP !== undefined ? data.playerHP : 5;
+  }
+
+  create() {
+    const ld=LEVELS[this.lvlIdx];
+
+    // Wave queue
+    this.queue=[];
+    ld.enemies.forEach(g=>{ for(let i=0;i<g.n;i++) this.queue.push(g.t); });
+    Phaser.Utils.Array.Shuffle(this.queue);
+    this.totalEn=this.queue.length; this.killed=0; this.qIdx=0;
+    this.lastSpwn=0; this.fireCd=0; this.invTime=0; this.dead=false;
+
+    // Player active effects
+    this.fx = { speed:false, speedEnd:0, rapid:false, rapidEnd:0, shield:false };
+
+    // Floor + border
+    for(let x=0;x<GW;x+=32)for(let y=0;y<GH;y+=32)this.add.image(x+16,y+16,'floor');
+    const bg=this.add.graphics();
+    bg.lineStyle(4,0x334455,1); bg.strokeRect(2,2,GW-4,GH-4);
+    bg.lineStyle(2,0x556677,1); bg.strokeRect(6,6,GW-12,GH-12);
+    this.physics.world.setBounds(10,10,GW-20,GH-20);
+
+    // Groups  (use group.create() so physics bodies are properly managed)
+    this.bullets  = this.physics.add.group();
+    this.enemies  = this.physics.add.group();
+    this.powerups = this.physics.add.staticGroup();
+
+    // Particles
+    this.sparks=this.add.particles(0,0,'p_spark',{speed:{min:80,max:220},scale:{start:1,end:0},alpha:{start:1,end:0},lifespan:350,quantity:0,blendMode:'ADD'});
+    this.bloods=this.add.particles(0,0,'p_blood',{speed:{min:60,max:160},scale:{start:1,end:0},alpha:{start:1,end:0},lifespan:400,quantity:0});
+    this.whites=this.add.particles(0,0,'p_white',{speed:{min:100,max:260},scale:{start:1.5,end:0},alpha:{start:1,end:0},lifespan:300,quantity:0,blendMode:'ADD'});
+
+    // Player
+    this.player=this.physics.add.sprite(GW/2,GH/2,'player',0);
+    this.player.setCollideWorldBounds(true).setDepth(10);
+    this.player.hp=this.playerHP;
+
+    // Animations (once per game instance)
+    if(!this.anims.exists('p_walk')) {
+      this.anims.create({key:'p_walk',frames:[{key:'player',frame:0},{key:'player',frame:1},{key:'player',frame:2},{key:'player',frame:3}],frameRate:8,repeat:-1});
+      this.anims.create({key:'p_idle',frames:[{key:'player',frame:0}],frameRate:1,repeat:-1});
+    }
+    Object.keys(ECFG).forEach(t=>{
+      if(!this.anims.exists('ew_'+t))
+        this.anims.create({key:'ew_'+t,frames:[{key:'e_'+t,frame:0},{key:'e_'+t,frame:1}],frameRate:4,repeat:-1});
+    });
+    this.player.play('p_idle');
+
+    // Crosshair
+    this.hair=this.add.image(GW/2,GH/2,'crosshair').setDepth(100);
+    this.input.mouse.disableContextMenu();
+    this.cursors=this.input.keyboard.createCursorKeys();
+    this.wasd=this.input.keyboard.addKeys('W,A,S,D');
+
+    // Collisions
+    this.physics.add.overlap(this.bullets,  this.enemies,  this.hitEnemy,    null, this);
+    this.physics.add.overlap(this.enemies,  this.player,   this.hitPlayer,   null, this);
+    this.physics.add.overlap(this.player,   this.powerups, this.collectPU,   null, this);
+
+    // Power-up spawn timer (from level 2 onward)
+    if (this.lvlIdx >= 1) {
+      this.puTimer = this.time.addEvent({ delay:12000, callback:this.spawnPU, callbackScope:this, loop:true, startAt:6000 });
+    }
+
+    // HUD overlay
+    this.dmgRect=this.add.rectangle(GW/2,GH/2,GW,GH,0xff0000,0).setDepth(200);
+    this.registry.set('score',    this.score);
+    this.registry.set('playerHP', this.playerHP);
+    this.registry.set('level',    this.lvlIdx+1);
+    this.registry.set('left',     this.totalEn);
+    this.registry.set('total',    this.totalEn);
+    this.registry.set('fx',       this.fx);
+
+    this.scene.launch('UIScene');
+    this.showAlert(ld.alert||('LEVEL '+(this.lvlIdx+1)), ld.alert?0xffdd00:0x44ff66);
+    this.cameras.main.fadeIn(400);
+  }
+
+  // ---- Power-up spawn ----
+
+  spawnPU(dropX, dropY) {
+    const types=Object.keys(PUCFG);
+    const type=types[Phaser.Math.Between(0,types.length-1)];
+    const x = dropX !== undefined ? dropX : Phaser.Math.Between(60,GW-60);
+    const y = dropY !== undefined ? dropY : Phaser.Math.Between(60,GH-60);
+
+    const pu = this.powerups.create(x, y, 'pu_'+type);
+    pu.puType = type;
+    pu.setDepth(4).setAlpha(0);
+
+    // Appear tween
+    this.tweens.add({ targets:pu, alpha:1, scale:1.1, duration:400, ease:'Power2' });
+
+    // Pulse animation
+    this.tweens.add({ targets:pu, scale:{from:0.9,to:1.2}, duration:600,
+      yoyo:true, repeat:-1, ease:'Sine.easeInOut' });
+    pu.tweenRotate = this.tweens.add({ targets:pu, angle:360, duration:2000, repeat:-1 });
+
+    // Auto-remove after 10s
+    this.time.delayedCall(10000, ()=>{
+      if(pu.active) {
+        this.tweens.add({ targets:pu, alpha:0, scale:0, duration:400,
+          onComplete:()=>{ if(pu.active) pu.destroy(); }
+        });
+      }
+    });
+  }
+
+  collectPU(player, pu) {
+    if (!pu.active) return;
+    const type = pu.puType;
+    const cfg  = PUCFG[type];
+
+    // Visual burst
+    this.whites.emitParticleAt(pu.x, pu.y, 8);
+    this.sparks.emitParticleAt(pu.x, pu.y, 6);
+
+    // Floating label
+    const c = '#'+cfg.col.toString(16).padStart(6,'0');
+    const t = this.add.text(pu.x, pu.y-10, cfg.label, {
+      fontSize:'18px', fontFamily:'monospace', color:c, stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5).setDepth(160);
+    this.tweens.add({ targets:t, y:pu.y-55, alpha:0, duration:800,
+      onComplete:()=>t.destroy() });
+
+    // Apply effect
+    const now = this.time.now;
+    switch(type) {
+      case 'health':
+        if(player.hp < 5) {
+          player.hp++;
+          this.registry.set('playerHP', player.hp);
+          this.cameras.main.flash(200, 0, 255, 80);
+        }
+        break;
+      case 'speed':
+        this.fx.speed=true; this.fx.speedEnd=now+cfg.dur;
+        this.player.setTint(0x44ffff);
+        break;
+      case 'rapid':
+        this.fx.rapid=true; this.fx.rapidEnd=now+cfg.dur;
+        this.player.setTint(0xffff44);
+        break;
+      case 'shield':
+        this.fx.shield=true;
+        this.player.setTint(0x4488ff);
+        break;
+    }
+    this.registry.set('fx', { ...this.fx });
+    pu.destroy();
+  }
+
+  // ---- Helpers ----
+
+  showAlert(msg, col) {
+    const c='#'+col.toString(16).padStart(6,'0');
+    const t=this.add.text(GW/2,GH/2-70,msg,{fontSize:'38px',fontFamily:'monospace',color:c,stroke:'#000',strokeThickness:5}).setOrigin(0.5).setDepth(150).setAlpha(0);
+    this.tweens.add({targets:t,alpha:1,y:GH/2-90,duration:350,
+      onComplete:()=>this.time.delayedCall(1100,()=>this.tweens.add({targets:t,alpha:0,duration:400,onComplete:()=>t.destroy()}))
+    });
+  }
+
+  popup(x,y,pts) {
+    const t=this.add.text(x,y,'+'+pts,{fontSize:'16px',fontFamily:'monospace',color:'#ffff44',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(120);
+    this.tweens.add({targets:t,y:y-45,alpha:0,duration:600,ease:'Power1',onComplete:()=>t.destroy()});
+  }
+
+  spawnEnemy(type) {
+    const c=ECFG[type];
+    const side=Phaser.Math.Between(0,3);
+    let x,y;
+    if(side===0){x=Phaser.Math.Between(20,GW-20);y=20;}
+    else if(side===1){x=GW-20;y=Phaser.Math.Between(20,GH-20);}
+    else if(side===2){x=Phaser.Math.Between(20,GW-20);y=GH-20;}
+    else{x=20;y=Phaser.Math.Between(20,GH-20);}
+
+    // Use group.create() so arcade body is properly initialised
+    const e=this.enemies.create(x,y,'e_'+type,0);
+    e.etype=type; e.hp=c.hp; e.maxhp=c.hp; e.pts=c.score;
+    e.setDepth(5).setBodySize(c.sz*0.8,c.sz*0.8);
+    e.play('ew_'+type);
+
+    if(type==='tank') {
+      e.hbg=this.add.rectangle(x,y-c.sz/2-4,34,5,0x440000).setDepth(6);
+      e.hbr=this.add.rectangle(x,y-c.sz/2-4,34,5,0xff3333).setDepth(7);
+    }
+  }
+
+  fireBullet() {
+    const now=this.time.now;
+    const cd = this.fx.rapid ? BASE_FIRE_CD/2 : BASE_FIRE_CD;
+    if(now-this.fireCd < cd) return;
+    this.fireCd=now;
+
+    // FIX: rotation is set directly to angle_to_mouse (no +PI/2 offset)
+    // so player.rotation == the angle the gun barrel points toward the mouse
+    const ang = this.player.rotation;
+    const bx  = this.player.x + Math.cos(ang)*18;
+    const by  = this.player.y + Math.sin(ang)*18;
+
+    // FIX: use bullets.create() so Phaser properly owns the physics body
+    const b = this.bullets.create(bx, by, 'bullet');
+    b.setDepth(8);
+    b.setVelocity(Math.cos(ang)*BULLET_SPEED, Math.sin(ang)*BULLET_SPEED);
+    b.body.allowGravity = false;
+
+    this.sparks.emitParticleAt(bx,by,5);
+
+    // Recoil
+    this.tweens.add({
+      targets:this.player,
+      x: this.player.x - Math.cos(ang)*4,
+      y: this.player.y - Math.sin(ang)*4,
+      duration:60, yoyo:true, ease:'Power2'
+    });
+  }
+
+  hitEnemy(bullet, enemy) {
+    bullet.destroy();
+    enemy.hp--;
+    enemy.setTint(0xffffff);
+    this.time.delayedCall(80,()=>{ if(enemy.active) enemy.clearTint(); });
+
+    if(enemy.etype!=='tank') {
+      const ang=Phaser.Math.Angle.Between(this.player.x,this.player.y,enemy.x,enemy.y);
+      this.tweens.add({targets:enemy,x:enemy.x+Math.cos(ang)*16,y:enemy.y+Math.sin(ang)*16,duration:80,ease:'Power1'});
+    }
+
+    if(enemy.hp<=0) {
+      this.killEnemy(enemy);
+    } else {
+      this.bloods.emitParticleAt(enemy.x,enemy.y,4);
+      if(enemy.hbr) {
+        const p=enemy.hp/enemy.maxhp;
+        enemy.hbr.width=34*p;
+        enemy.hbr.x=enemy.x-17+(34*p)/2;
+      }
+    }
+  }
+
+  killEnemy(enemy) {
+    this.bloods.emitParticleAt(enemy.x,enemy.y,10);
+    this.sparks.emitParticleAt(enemy.x,enemy.y,7);
+    this.popup(enemy.x,enemy.y-12,enemy.pts);
+    this.score+=enemy.pts;
+    this.registry.set('score',this.score);
+    if(enemy.hbg)enemy.hbg.destroy();
+    if(enemy.hbr)enemy.hbr.destroy();
+
+    // Drop power-up: tanks 40%, grunts/fast 12%
+    const dropChance = enemy.etype==='tank' ? 0.40 : 0.12;
+    if(Math.random() < dropChance && this.lvlIdx>=1)
+      this.spawnPU(enemy.x, enemy.y);
+
+    enemy.destroy();
+    this.killed++;
+    this.registry.set('left',Math.max(0,this.totalEn-this.killed));
+    this.checkDone();
+  }
+
+  hitPlayer(enemy, player) {
+    if(this.invTime>this.time.now||this.dead) return;
+    this.invTime=this.time.now+1000;
+
+    // Shield absorbs one hit
+    if(this.fx.shield) {
+      this.fx.shield=false;
+      this.registry.set('fx',{...this.fx});
+      // Restore neutral tint (unless other effect active)
+      if(!this.fx.speed && !this.fx.rapid) player.clearTint();
+      else if(this.fx.speed) player.setTint(0x44ffff);
+      else player.setTint(0xffff44);
+      this.cameras.main.flash(300,0,100,255);
+      this.whites.emitParticleAt(player.x,player.y,12);
+      return;
+    }
+
+    player.hp--;
+    this.registry.set('playerHP',player.hp);
+    this.whites.emitParticleAt(player.x,player.y,10);
+    this.cameras.main.shake(200,0.012);
+    this.dmgRect.setAlpha(0.45);
+    this.tweens.add({targets:this.dmgRect,alpha:0,duration:450});
+    player.setTint(0xff4444);
+    this.time.delayedCall(160,()=>{ if(player.active) player.clearTint(); });
+    if(player.hp<=0) this.gameOver();
+  }
+
+  checkDone() {
+    if(this.dead||this.qIdx<this.queue.length||this.enemies.countActive(true)>0) return;
+    this.dead=true;
+    this.saveBest();
+    const last=this.lvlIdx>=LEVELS.length-1;
+    this.time.delayedCall(900,()=>{
+      this.scene.stop('UIScene');
+      this.cameras.main.fadeOut(500,0,0,0);
+      this.cameras.main.once('camerafadeoutcomplete',()=>{
+        if(last) this.scene.start('GameOverScene',{score:this.score,level:this.lvlIdx+1,win:true});
+        else     this.scene.start('LevelCompleteScene',{score:this.score,level:this.lvlIdx,playerHP:this.player.hp});
+      });
+    });
+  }
+
+  gameOver() {
+    if(this.dead) return;
+    this.dead=true;
+    this.player.setVelocity(0,0);
+    this.sparks.emitParticleAt(this.player.x,this.player.y,20);
+    this.whites.emitParticleAt(this.player.x,this.player.y,16);
+    this.player.setVisible(false);
+    this.cameras.main.shake(500,0.02);
+    this.saveBest();
+    this.time.delayedCall(1200,()=>{
+      this.scene.stop('UIScene');
+      this.cameras.main.fadeOut(600,0,0,0);
+      this.cameras.main.once('camerafadeoutcomplete',()=>
+        this.scene.start('GameOverScene',{score:this.score,level:this.lvlIdx+1,win:false}));
+    });
+  }
+
+  saveBest() {
+    const b=parseInt(localStorage.getItem('raHigh')||'0');
+    if(this.score>b) localStorage.setItem('raHigh',this.score);
+  }
+
+  update(time, dt) {
+    if(this.dead) return;
+
+    // Expire timed effects
+    const now=this.time.now;
+    if(this.fx.speed && now>this.fx.speedEnd) {
+      this.fx.speed=false;
+      this.registry.set('fx',{...this.fx});
+      if(!this.fx.rapid&&!this.fx.shield) this.player.clearTint();
+      else if(this.fx.rapid) this.player.setTint(0xffff44);
+    }
+    if(this.fx.rapid && now>this.fx.rapidEnd) {
+      this.fx.rapid=false;
+      this.registry.set('fx',{...this.fx});
+      if(!this.fx.speed&&!this.fx.shield) this.player.clearTint();
+      else if(this.fx.speed) this.player.setTint(0x44ffff);
+    }
+
+    // Movement
+    const L=this.cursors.left.isDown  ||this.wasd.A.isDown;
+    const R=this.cursors.right.isDown ||this.wasd.D.isDown;
+    const U=this.cursors.up.isDown    ||this.wasd.W.isDown;
+    const D=this.cursors.down.isDown  ||this.wasd.S.isDown;
+    let vx=0,vy=0;
+    if(L)vx-=1; if(R)vx+=1;
+    if(U)vy-=1; if(D)vy+=1;
+    if(vx&&vy){vx*=0.707;vy*=0.707;}
+    const spd = BASE_SPEED * (this.fx.speed ? 1.6 : 1);
+    this.player.setVelocity(vx*spd, vy*spd);
+
+    const moving=vx!==0||vy!==0;
+    const ca=this.player.anims.currentAnim?.key;
+    if(moving  && ca!=='p_walk') this.player.play('p_walk');
+    if(!moving && ca!=='p_idle') this.player.play('p_idle');
+
+    // Aim: set rotation = angle toward mouse (gun sprite points RIGHT at rotation=0)
+    const ptr=this.input.activePointer;
+    this.player.setRotation(
+      Phaser.Math.Angle.Between(this.player.x,this.player.y,ptr.x,ptr.y)
+    );
+    this.hair.setPosition(ptr.x,ptr.y);
+
+    // Auto-fire while left mouse held
+    if(this.input.activePointer.leftButtonDown()) this.fireBullet();
+
+    // Enemy AI
+    this.enemies.getChildren().forEach(e=>{
+      if(!e.active) return;
+      const ang=Phaser.Math.Angle.Between(e.x,e.y,this.player.x,this.player.y);
+      const spd=ECFG[e.etype].speed;
+      if(e.etype==='fast') {
+        const zz=Math.sin(time*0.005+e.x*0.1)*65;
+        e.setVelocity(Math.cos(ang)*spd+Math.cos(ang+Math.PI/2)*zz,
+                      Math.sin(ang)*spd+Math.sin(ang+Math.PI/2)*zz);
+      } else {
+        e.setVelocity(Math.cos(ang)*spd,Math.sin(ang)*spd);
+      }
+      e.setRotation(ang);
+      if(e.hbg) {
+        const p=e.hp/e.maxhp;
+        e.hbg.setPosition(e.x,e.y-ECFG[e.etype].sz/2-4);
+        e.hbr.x=e.x-17+(34*p)/2; e.hbr.y=e.y-ECFG[e.etype].sz/2-4;
+        e.hbr.width=34*p;
+      }
+    });
+
+    // Spawner
+    if(this.qIdx<this.queue.length && time-this.lastSpwn>=LEVELS[this.lvlIdx].ivl) {
+      this.spawnEnemy(this.queue[this.qIdx++]); this.lastSpwn=time;
+    }
+
+    // Bullet out-of-bounds cleanup
+    this.bullets.getChildren().forEach(b=>{
+      if(b.x<0||b.x>GW||b.y<0||b.y>GH) b.destroy();
+    });
+  }
+}
+
+// ============================================================
+// SECTION 6: UIScene
+// ============================================================
+
+class UIScene extends Phaser.Scene {
+  constructor() { super('UIScene'); }
+
+  create() {
+    this.add.rectangle(GW/2,20,GW,40,0x000000,0.65);
+    this.hearts=[];
+    for(let i=0;i<5;i++)
+      this.hearts.push(this.add.image(16+i*24,20,'heart_f').setScale(0.85));
+    this.scoreTxt=this.add.text(GW/2,20,'SCORE: 0',{fontSize:'18px',fontFamily:'monospace',color:'#ffffff'}).setOrigin(0.5);
+    this.lvlTxt=this.add.text(GW-10,20,'LEVEL 1',{fontSize:'18px',fontFamily:'monospace',color:'#44ff66'}).setOrigin(1,0.5);
+
+    // Wave bar
+    this.add.rectangle(GW/2,GH-18,310,18,0x000000,0.65);
+    this.barBg=this.add.rectangle(GW/2,GH-18,290,10,0x333333);
+    this.bar=this.add.rectangle(GW/2-145,GH-18,0,10,0x44ff66).setOrigin(0,0.5);
+    this.waveTxt=this.add.text(GW/2,GH-37,'ENEMIES: 0/0',{fontSize:'12px',fontFamily:'monospace',color:'#888888'}).setOrigin(0.5);
+
+    // Active power-up indicators (top right, below level text)
+    this.fxLabels=[];
+    for(let i=0;i<4;i++) {
+      this.fxLabels.push(
+        this.add.text(GW-8,(i*18)+44,'',{fontSize:'11px',fontFamily:'monospace',color:'#ffffff'}).setOrigin(1,0).setAlpha(0)
+      );
+    }
+
+    this.prevHP=5;
+    this.prevFx={};
+  }
+
+  update() {
+    const hp    = this.registry.get('playerHP')??5;
+    const score = this.registry.get('score')??0;
+    const level = this.registry.get('level')??1;
+    const left  = this.registry.get('left')??0;
+    const total = this.registry.get('total')??1;
+    const fx    = this.registry.get('fx')||{};
+
+    if(hp!==this.prevHP) {
+      this.hearts.forEach((h,i)=>h.setTexture(i<hp?'heart_f':'heart_e'));
+      this.prevHP=hp;
+    }
+    this.scoreTxt.setText('SCORE: '+score);
+    this.lvlTxt.setText('LEVEL '+level);
+    const killed=total-left;
+    this.bar.width=290*(killed/total);
+    this.waveTxt.setText(`ENEMIES: ${killed}/${total}`);
+
+    // Power-up status
+    const now=Date.now();
+    let row=0;
+    const entries=[
+      { active:fx.speed,  end:fx.speedEnd,  label:'SPEED', col:'#00ddff' },
+      { active:fx.rapid,  end:fx.rapidEnd,  label:'RAPID', col:'#ffcc00' },
+      { active:fx.shield, end:0,            label:'SHIELD',col:'#4488ff' },
+    ];
+    entries.forEach(e=>{
+      if(e.active) {
+        const lbl=this.fxLabels[row];
+        const rem = e.end>0 ? Math.ceil((e.end-this.scene.get('GameScene').time.now)/1000) : '–';
+        lbl.setText(`[${e.label}${e.end>0?' '+rem+'s':''}]`).setColor(e.col).setAlpha(1);
+        row++;
+      }
+    });
+    for(let i=row;i<this.fxLabels.length;i++) this.fxLabels[i].setAlpha(0);
+  }
+}
+
+// ============================================================
+// SECTION 7: LevelCompleteScene
+// ============================================================
+
+class LevelCompleteScene extends Phaser.Scene {
+  constructor() { super('LevelCompleteScene'); }
+  init(d) { this.lvl=d.level; this.score=d.score; this.php=d.playerHP; }
+
+  create() {
+    for(let x=0;x<GW;x+=32)for(let y=0;y<GH;y+=32)this.add.image(x+16,y+16,'floor');
+    this.add.rectangle(GW/2,GH/2,GW,GH,0x000000,0.78);
+
+    this.add.text(GW/2,170,`LEVEL ${this.lvl+1} COMPLETE!`,{fontSize:'42px',fontFamily:'monospace',color:'#44ff66',stroke:'#000',strokeThickness:5}).setOrigin(0.5);
+    this.add.text(GW/2,265,`SCORE: ${this.score}`,{fontSize:'30px',fontFamily:'monospace',color:'#ffff44'}).setOrigin(0.5);
+    this.add.text(GW/2,320,`HEALTH REMAINING: ${this.php} / 5`,{fontSize:'20px',fontFamily:'monospace',color:'#ff6688'}).setOrigin(0.5);
+    this.add.text(GW/2,375,`PREPARE FOR LEVEL ${this.lvl+2}`,{fontSize:'20px',fontFamily:'monospace',color:'#aaaaff'}).setOrigin(0.5);
+
+    // Power-up legend hint from level 2+
+    if(this.lvl>=1) {
+      this.add.text(GW/2,420,'Power-Ups:  +HP  SPEED  RAPID FIRE  SHIELD',{fontSize:'13px',fontFamily:'monospace',color:'#555577'}).setOrigin(0.5);
+    }
+
+    const p=this.add.text(GW/2,460,'Press SPACE or click to continue',{fontSize:'15px',fontFamily:'monospace',color:'#555555'}).setOrigin(0.5);
+    this.tweens.add({targets:p,alpha:0.2,duration:600,yoyo:true,repeat:-1});
+    this.ok=false; this.time.delayedCall(1500,()=>this.ok=true);
+    this.input.keyboard.on('keydown-SPACE',()=>this.next());
+    this.input.keyboard.on('keydown-ENTER',()=>this.next());
+    this.input.on('pointerdown',()=>this.next());
+    this.cameras.main.fadeIn(400);
+  }
+
+  next() {
+    if(!this.ok)return;
+    this.cameras.main.fadeOut(400,0,0,0);
+    this.cameras.main.once('camerafadeoutcomplete',()=>
+      this.scene.start('GameScene',{level:this.lvl+1,score:this.score,playerHP:this.php}));
+  }
+}
+
+// ============================================================
+// SECTION 8: GameOverScene
+// ============================================================
+
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  init(d) { this.score=d.score||0; this.level=d.level||1; this.win=d.win||false; }
+
+  create() {
+    for(let x=0;x<GW;x+=32)for(let y=0;y<GH;y+=32)this.add.image(x+16,y+16,'floor');
+    this.add.rectangle(GW/2,GH/2,GW,GH,0x000000,0.82);
+
+    if(this.win) {
+      this.add.text(GW/2,145,'VICTORY!',{fontSize:'70px',fontFamily:'monospace',color:'#ffdd00',stroke:'#000',strokeThickness:7}).setOrigin(0.5);
+      this.add.text(GW/2,228,'ALL WAVES CLEARED',{fontSize:'22px',fontFamily:'monospace',color:'#44ff66'}).setOrigin(0.5);
+    } else {
+      this.add.text(GW/2,155,'GAME OVER',{fontSize:'70px',fontFamily:'monospace',color:'#ff3333',stroke:'#000',strokeThickness:7}).setOrigin(0.5);
+      this.add.text(GW/2,238,`REACHED LEVEL ${this.level}`,{fontSize:'22px',fontFamily:'monospace',color:'#888888'}).setOrigin(0.5);
+    }
+
+    this.add.text(GW/2,298,`FINAL SCORE: ${this.score}`,{fontSize:'30px',fontFamily:'monospace',color:'#ffff44'}).setOrigin(0.5);
+    const best=parseInt(localStorage.getItem('raHigh')||'0');
+    const nb=this.score>=best&&this.score>0;
+    this.add.text(GW/2,348,nb?'★  NEW BEST SCORE!  ★':`BEST: ${best}`,{fontSize:'18px',fontFamily:'monospace',color:nb?'#ffaa00':'#555555'}).setOrigin(0.5);
+
+    const r=this.add.rectangle(GW/2,420,210,48,0x441111).setInteractive({useHandCursor:true});
+    const rt=this.add.text(GW/2,420,'[ PLAY AGAIN ]',{fontSize:'21px',fontFamily:'monospace',color:'#ff6666'}).setOrigin(0.5);
+    r.on('pointerover',()=>{r.setFillStyle(0x662222);rt.setColor('#ffaaaa');});
+    r.on('pointerout', ()=>{r.setFillStyle(0x441111);rt.setColor('#ff6666');});
+    r.on('pointerdown',()=>this.restart());
+
+    const m=this.add.rectangle(GW/2,478,210,38,0x222244).setInteractive({useHandCursor:true});
+    const mt=this.add.text(GW/2,478,'[ MAIN MENU ]',{fontSize:'16px',fontFamily:'monospace',color:'#6688ff'}).setOrigin(0.5);
+    m.on('pointerover',()=>{m.setFillStyle(0x333366);mt.setColor('#aabbff');});
+    m.on('pointerout', ()=>{m.setFillStyle(0x222244);mt.setColor('#6688ff');});
+    m.on('pointerdown',()=>this.menu());
+
+    this.input.keyboard.on('keydown-SPACE',()=>this.restart());
+    this.input.keyboard.on('keydown-ENTER',()=>this.restart());
+    this.cameras.main.fadeIn(500);
+  }
+
+  restart() {
+    this.cameras.main.fadeOut(400,0,0,0);
+    this.cameras.main.once('camerafadeoutcomplete',()=>
+      this.scene.start('GameScene',{level:0,score:0,playerHP:5}));
+  }
+  menu() {
+    this.cameras.main.fadeOut(400,0,0,0);
+    this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('MenuScene'));
+  }
+}
+
+// ============================================================
+// SECTION 9: LAUNCH
+// ============================================================
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: GW, height: GH,
+  backgroundColor: '#111122',
+  physics: { default:'arcade', arcade:{ gravity:{y:0}, debug:false } },
+  scene: [BootScene, MenuScene, GameScene, UIScene, LevelCompleteScene, GameOverScene],
+});
+</script>
+</body>
+</html>
