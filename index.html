@@ -57,6 +57,30 @@ const LEVELS = [
   { enemies:[{t:'grunt',n:20},{t:'fast',n:15},{t:'tank',n:10}],ivl:1000,alert:'FINAL WAVE!'     },
 ];
 
+// ---- Web Audio SFX (synthesized, no external files) ----
+const SFX = (() => {
+  let ctx = null;
+  function ac() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  return {
+    shoot() {
+      const c = ac();
+      const osc = c.createOscillator(), g = c.createGain();
+      osc.connect(g); g.connect(c.destination);
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(520, c.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, c.currentTime + 0.08);
+      g.gain.setValueAtTime(0.18, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.09);
+      osc.start(c.currentTime);
+      osc.stop(c.currentTime + 0.09);
+    },
+  };
+})();
+
 // ============================================================
 // SECTION 2: SPRITE GENERATION
 // ============================================================
@@ -454,6 +478,7 @@ class GameScene extends Phaser.Scene {
     const cd = this.fx.rapid ? BASE_FIRE_CD/2 : BASE_FIRE_CD;
     if(now-this.fireCd < cd) return;
     this.fireCd=now;
+    SFX.shoot();
 
     // FIX: rotation is set directly to angle_to_mouse (no +PI/2 offset)
     // so player.rotation == the angle the gun barrel points toward the mouse
