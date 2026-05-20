@@ -39,14 +39,44 @@ Everything lives in `index.html` as a single `<script>` block, split into 9 labe
 | Section | What it does |
 |---|---|
 | 1 – Constants & Level Data | `GW/GH`, `COLORS`, `ECFG` (enemy configs), `PUCFG` (power-up configs), `LEVELS` array |
-| 2 – Sprite Generation | Pure-graphics functions (`genPlayer`, `genEnemies`, `genBullet`, etc.) — draw to `Graphics`, call `generateTexture`, then manually register frames with `texture.add(i, 0, x, 0, w, h)` |
+| 2 – Sprite Generation | Pure-graphics functions (`genPlayer`, `genEnemies`, `genBoss`, `genBullet`, etc.) — draw to `Graphics`, call `generateTexture`, then manually register frames with `texture.add(i, 0, x, 0, w, h)` |
 | 3 – BootScene | Calls all `gen*` functions then starts `MenuScene` |
-| 4 – MenuScene | Title screen with floating enemy sprites and high-score read from `localStorage` |
-| 5 – GameScene | Core gameplay: spawner queue, player physics, bullet/enemy/powerup groups, collision handlers, AI, effect timers |
+| 4 – MenuScene | Title screen with floating enemy sprites and high-score read from `localStorage`. Starts `SFX.music` on create, stops on `go()`. |
+| 5 – GameScene | Core gameplay: spawner queue, player physics, bullet/enemy/powerup groups, collision handlers, AI, effect timers. After last enemy in a level is killed, transitions to `BossScene` (if a boss follows) or `LevelCompleteScene`. |
+| 5b – BossScene | Boss fight: single boss entity, phase-based AI, dedicated HP bar. Passes `{level, score, playerHP}` to `LevelCompleteScene` on win. |
 | 6 – UIScene | Runs **in parallel** with GameScene; reads all state from `this.registry` (never from GameScene directly) |
 | 7 – LevelCompleteScene | Between-level screen; passes `{level, score, playerHP}` to next `GameScene` |
 | 8 – GameOverScene | Win/lose screen; reads/writes high score in `localStorage` key `raHigh` |
 | 9 – Launch | `new Phaser.Game(...)` config |
+
+## SFX system (`SFX` global, Section 1)
+
+All audio is synthesized via Web Audio API — no external files. `SFX` is a global IIFE defined at the end of Section 1.
+
+| Method | When to call |
+|---|---|
+| `SFX.shoot()` | In `fireBullet()` after cooldown check |
+| `SFX.hit()` | In `hitEnemy()` when enemy survives (hp > 0) |
+| `SFX.explode()` | In `killEnemy()` |
+| `SFX.puPickup()` | In `collectPU()` |
+| `SFX.playerHit()` | In `hitPlayer()` when damage is taken |
+| `SFX.shieldBlock()` | In `hitPlayer()` when shield absorbs |
+| `SFX.music.start()` | In `MenuScene.create()` |
+| `SFX.music.stop()` | In `MenuScene.go()` before transition |
+
+**Adding a new sound**: add a method to the `SFX` return object. Use the internal `tone(freq, t, dur, type, vol, freqEnd)` helper or create oscillators/buffers directly from `ac()` (the shared AudioContext getter).
+
+## Particle emitters (GameScene)
+
+| Name | Texture | Use |
+|---|---|---|
+| `this.sparks` | `p_spark` (yellow) | muzzle flash, bullet impact |
+| `this.bloods` | `p_blood` (red) | enemy hit/death |
+| `this.whites` | `p_white` (white) | bright flash, shield, muzzle flash |
+| `this.thrusts` | `p_thrust` (cyan) | player thrust trail (emits from rear) |
+| `this.fires` | `p_fire` (orange) | explosion fire on enemy death |
+
+All emitters use `quantity:0` and are triggered manually with `emitParticleAt(x, y, count)`.
 
 ## Key invariants
 
@@ -56,3 +86,17 @@ Everything lives in `index.html` as a single `<script>` block, split into 9 labe
 - **UIScene ↔ GameScene communication**: via `this.registry` only. UIScene calls `this.scene.get('GameScene').time.now` only for the power-up countdown timer.
 - **Adding a level**: append an entry to `LEVELS`. Enemy wave is built from `{t: type, n: count}` objects; `ivl` is spawn interval in ms.
 - **Adding an enemy type**: add to `ECFG`, add colors to `COLORS`, handle the shape in `genEnemies`, add an `ew_<type>` animation in `GameScene.create()`.
+
+## Planned: Boss system (NOT YET IMPLEMENTED)
+
+Level flow after bosses are added:
+```
+Level 1 → Level 2 → BOSS 1 → Level 3 → Level 4 → BOSS 2 → Level 5 → ENDBOSS
+```
+
+Boss specs:
+- **BOSS 1** (after Level 2): large Grunt-type, high HP (~20), Spread-Shot (3 bullets at ±20°)
+- **BOSS 2** (after Level 4): fast Tank-type, high HP (~30), Charge-Attack (dash at player)
+- **ENDBOSS** (after Level 5): combined patterns — Spread + Charge, highest HP (~50)
+
+Implementation approach: dedicated `BossScene` that `GameScene` transitions to instead of `LevelCompleteScene` when `lvlIdx` matches a boss trigger (after level index 1, 3, 5). BossScene reuses the same player controls + UIScene pattern. On boss death → `LevelCompleteScene`.
