@@ -65,18 +65,96 @@ const SFX = (() => {
     if (ctx.state === 'suspended') ctx.resume();
     return ctx;
   }
+
+  function tone(freq, t, dur, type, vol, freqEnd) {
+    const c = ac(), o = c.createOscillator(), g = c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.start(t); o.stop(t + dur + 0.01);
+  }
+
+  // Menu music: E-minor pentatonic, 152 BPM
+  let _mrun = false, _mstep = 0, _mnext = 0, _mtid = null;
+  const S = 60 / 152 / 2; // eighth-note in seconds
+  const MEL = [329,0,392,440,494,0,440,392,329,0,294,329,392,0,440,392];
+  const BAS = [ 82,0,  0,  0,110,0,  0,  0,123,0,  0,  0, 98,0,  0,  0];
+  const KIK = [  1,0,  0,  0,  0,0,  0,  0,  1,0,  0,  0,  0,0,  0,  0];
+  const SNR = [  0,0,  0,  0,  1,0,  0,  0,  0,0,  0,  0,  1,0,  0,  0];
+
+  function mTick() {
+    if (!_mrun) return;
+    const c = ac(), horizon = c.currentTime + 0.1;
+    while (_mnext < horizon) {
+      const i = _mstep % MEL.length, t = _mnext;
+      if (MEL[i]) tone(MEL[i], t, S * 0.82, 'square', 0.055);
+      if (BAS[i]) tone(BAS[i], t, S * 1.85, 'triangle', 0.07);
+      if (KIK[i]) {
+        const o = c.createOscillator(), g = c.createGain();
+        o.connect(g); g.connect(c.destination); o.type = 'sine';
+        o.frequency.setValueAtTime(150, t);
+        o.frequency.exponentialRampToValueAtTime(30, t + 0.1);
+        g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+        o.start(t); o.stop(t + 0.13);
+      }
+      if (SNR[i]) {
+        const buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.1), c.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let j = 0; j < d.length; j++) d[j] = Math.random() * 2 - 1;
+        const src = c.createBufferSource(), g = c.createGain();
+        src.buffer = buf; src.connect(g); g.connect(c.destination);
+        g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+        src.start(t);
+      }
+      _mnext += S; _mstep++;
+    }
+    _mtid = setTimeout(mTick, 25);
+  }
+
   return {
     shoot() {
+      const t = ac().currentTime;
+      tone(520, t, 0.09, 'square', 0.18, 80);
+    },
+    hit() {
+      const t = ac().currentTime;
+      tone(200, t, 0.06, 'sine', 0.12, 80);
+    },
+    explode() {
+      const c = ac(), t = c.currentTime;
+      const buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.28), c.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain();
+      flt.type = 'lowpass'; flt.frequency.value = 420;
+      src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(c.destination);
+      g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      src.start(t);
+      tone(110, t, 0.16, 'sine', 0.38, 28);
+    },
+    puPickup() {
       const c = ac();
-      const osc = c.createOscillator(), g = c.createGain();
-      osc.connect(g); g.connect(c.destination);
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(520, c.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(80, c.currentTime + 0.08);
-      g.gain.setValueAtTime(0.18, c.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.09);
-      osc.start(c.currentTime);
-      osc.stop(c.currentTime + 0.09);
+      [523, 659, 784].forEach((f, i) => tone(f, c.currentTime + i * 0.08, 0.13, 'triangle', 0.14));
+    },
+    playerHit() {
+      const t = ac().currentTime;
+      tone(180, t, 0.18, 'sawtooth', 0.22, 55);
+    },
+    shieldBlock() {
+      const c = ac();
+      [880, 1100, 660].forEach((f, i) => tone(f, c.currentTime + i * 0.045, 0.09, 'square', 0.09));
+    },
+    music: {
+      start() {
+        if (_mrun) return;
+        _mrun = true; _mstep = 0;
+        _mnext = ac().currentTime + 0.05;
+        mTick();
+      },
+      stop() { _mrun = false; clearTimeout(_mtid); },
     },
   };
 })();
@@ -255,9 +333,11 @@ class MenuScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-SPACE',()=>this.go());
     this.input.keyboard.on('keydown-ENTER',()=>this.go());
     this.ft=0;
+    SFX.music.start();
   }
 
   go() {
+    SFX.music.stop();
     this.cameras.main.fadeOut(400,0,0,0);
     this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('GameScene',{level:0,score:0,playerHP:5}));
   }
@@ -398,6 +478,7 @@ class GameScene extends Phaser.Scene {
     const type = pu.puType;
     const cfg  = PUCFG[type];
 
+    SFX.puPickup();
     // Visual burst
     this.whites.emitParticleAt(pu.x, pu.y, 8);
     this.sparks.emitParticleAt(pu.x, pu.y, 6);
@@ -517,6 +598,7 @@ class GameScene extends Phaser.Scene {
     if(enemy.hp<=0) {
       this.killEnemy(enemy);
     } else {
+      SFX.hit();
       this.bloods.emitParticleAt(enemy.x,enemy.y,4);
       if(enemy.hbr) {
         const p=enemy.hp/enemy.maxhp;
@@ -527,6 +609,7 @@ class GameScene extends Phaser.Scene {
   }
 
   killEnemy(enemy) {
+    SFX.explode();
     this.bloods.emitParticleAt(enemy.x,enemy.y,10);
     this.sparks.emitParticleAt(enemy.x,enemy.y,7);
     this.popup(enemy.x,enemy.y-12,enemy.pts);
@@ -554,15 +637,16 @@ class GameScene extends Phaser.Scene {
     if(this.fx.shield) {
       this.fx.shield=false;
       this.registry.set('fx',{...this.fx});
-      // Restore neutral tint (unless other effect active)
       if(!this.fx.speed && !this.fx.rapid) player.clearTint();
       else if(this.fx.speed) player.setTint(0x44ffff);
       else player.setTint(0xffff44);
+      SFX.shieldBlock();
       this.cameras.main.flash(300,0,100,255);
       this.whites.emitParticleAt(player.x,player.y,12);
       return;
     }
 
+    SFX.playerHit();
     player.hp--;
     this.registry.set('playerHP',player.hp);
     this.whites.emitParticleAt(player.x,player.y,10);
