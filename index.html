@@ -165,21 +165,43 @@ const SFX = (() => {
 
 function genPlayer(scene) {
   const g = scene.add.graphics();
+  const engCol = [0x0077ff, 0x0044cc, 0x0099ff, 0x0055ee];
   for (let f = 0; f < 4; f++) {
-    const ox  = f * 32;
-    const leg = [0,3,0,-3][f];
-    g.fillStyle(0x000000, 0.3);  g.fillEllipse(ox+16,27,18,7);
-    g.fillStyle(COLORS.playerDark,1); g.fillCircle(ox+16,14,11);
-    g.fillStyle(COLORS.player,1);     g.fillCircle(ox+16,13,9);
-    g.fillStyle(COLORS.playerDark,1);
-    g.fillRect(ox+10,21,5,7+leg); g.fillRect(ox+17,21,5,7-leg);
-    g.fillStyle(COLORS.gun,1);
-    g.fillRect(ox+19,11,12,4); g.fillRect(ox+29,10,4,6);
-    g.fillStyle(0x88ffaa,1); g.fillCircle(ox+13,10,4);
+    const ox = f * 32;
+    const leg = [0, 3, 0, -3][f];
+    // Shadow
+    g.fillStyle(0x000000, 0.3); g.fillEllipse(ox+16, 27, 20, 8);
+    // Engine glow (drawn first so body covers right half)
+    g.fillStyle(0x001133, 1); g.fillEllipse(ox+4, 14, 9, 6);
+    g.fillStyle(engCol[f], 0.9); g.fillEllipse(ox+4, 14, 6, 4);
+    g.fillStyle(0xbbddff, 0.8); g.fillEllipse(ox+4, 14, 2, 2);
+    // Body outer hull
+    g.fillStyle(COLORS.playerDark, 1); g.fillCircle(ox+16, 14, 11);
+    // Body main
+    g.fillStyle(COLORS.player, 1); g.fillCircle(ox+16, 13, 9);
+    // Armor sheen
+    g.fillStyle(0xaaffcc, 0.4); g.fillEllipse(ox+14, 10, 9, 5);
+    // Legs
+    g.fillStyle(COLORS.playerDark, 1);
+    g.fillRect(ox+10, 21, 5, 7+leg); g.fillRect(ox+17, 21, 5, 7-leg);
+    g.fillStyle(0x115522, 1);
+    g.fillRect(ox+9, 26+leg, 7, 3); g.fillRect(ox+17, 26-leg, 7, 3);
+    // Gun shoulder mount
+    g.fillStyle(0x888888, 1); g.fillRect(ox+18, 10, 5, 8);
+    // Gun barrel
+    g.fillStyle(COLORS.gun, 1); g.fillRect(ox+20, 11, 12, 4);
+    g.fillStyle(0xffffff, 0.55); g.fillRect(ox+20, 11, 11, 1);
+    g.fillStyle(0x999999, 1); g.fillRect(ox+20, 15, 11, 1);
+    // Muzzle tip
+    g.fillStyle(0xeeeeee, 1); g.fillRect(ox+31, 10, 2, 6);
+    // Cockpit visor
+    g.fillStyle(0x001133, 1); g.fillEllipse(ox+13, 12, 10, 8);
+    g.fillStyle(0x1144bb, 1); g.fillEllipse(ox+12, 11, 7, 5);
+    g.fillStyle(0x88aaff, 0.8); g.fillEllipse(ox+11, 10, 3, 2);
   }
-  g.generateTexture('player',128,32); g.destroy();
+  g.generateTexture('player', 128, 32); g.destroy();
   const tx = scene.textures.get('player');
-  for (let i=0;i<4;i++) tx.add(i,0,i*32,0,32,32);
+  for (let i = 0; i < 4; i++) tx.add(i, 0, i*32, 0, 32, 32);
 }
 
 function genEnemies(scene) {
@@ -188,29 +210,70 @@ function genEnemies(scene) {
     for (let f=0;f<2;f++) {
       const ox=f*s, bob=f*2;
       if (c.shape==='square') {
+        // Armored chassis
         g.fillStyle(c.dark,1); g.fillRect(ox+2,4+bob,s-4,s-6);
         g.fillStyle(c.col,1);  g.fillRect(ox+3,3+bob,s-6,s-8);
-        g.fillStyle(0x000000,1);
-        g.fillRect(ox+5,7+bob,4,4); g.fillRect(ox+s-9,7+bob,4,4);
-        g.fillStyle(0xffffff,1);
-        g.fillRect(ox+6,8+bob,2,2); g.fillRect(ox+s-8,8+bob,2,2);
+        // Corner armor bolts
+        g.fillStyle(c.dark,1);
+        g.fillRect(ox+2,4+bob,3,3);     g.fillRect(ox+s-5,4+bob,3,3);
+        g.fillRect(ox+2,s-8+bob,3,3);   g.fillRect(ox+s-5,s-8+bob,3,3);
+        // Top sensor
+        g.fillStyle(c.dark,1); g.fillRect(ox+s/2-2,1+bob,4,4);
+        g.fillStyle(0xff4444,1); g.fillRect(ox+s/2-1,2+bob,2,2);
+        // Eye sockets
+        g.fillStyle(0x110000,1);
+        g.fillRect(ox+5,7+bob,5,5); g.fillRect(ox+s-10,7+bob,5,5);
+        // Eye glow (red)
+        g.fillStyle(0xff2200,1);
+        g.fillRect(ox+6,8+bob,3,3); g.fillRect(ox+s-9,8+bob,3,3);
+        // Eye highlight
+        g.fillStyle(0xff8866,1);
+        g.fillRect(ox+7,8+bob,1,1); g.fillRect(ox+s-8,8+bob,1,1);
+        // Mouth grill
+        g.fillStyle(0x000000,1); g.fillRect(ox+5,14+bob,s-10,3);
+        g.fillStyle(c.dark,1);
+        for(let mx=7;mx<s-5;mx+=4) g.fillRect(ox+mx,14+bob,2,3);
       } else if (c.shape==='diamond') {
         const cx=ox+s/2, cy=s/2;
+        // Outer diamond
         g.fillStyle(c.dark,1);
-        g.fillPoints([{x:cx,y:2+bob},{x:ox+s-2,y:cy+bob},{x:cx,y:s-2+bob},{x:ox+2,y:cy+bob}],true);
+        g.fillPoints([{x:cx,y:1+bob},{x:ox+s-1,y:cy+bob},{x:cx,y:s-1+bob},{x:ox+1,y:cy+bob}],true);
+        // Main diamond
         g.fillStyle(c.col,1);
-        g.fillPoints([{x:cx,y:5+bob},{x:ox+s-5,y:cy+bob},{x:cx,y:s-4+bob},{x:ox+5,y:cy+bob}],true);
-        g.fillStyle(0x000000,1); g.fillCircle(cx,cy+bob,3);
-        g.fillStyle(0xffffff,1); g.fillCircle(cx+1,cy-1+bob,1.5);
+        g.fillPoints([{x:cx,y:4+bob},{x:ox+s-4,y:cy+bob},{x:cx,y:s-3+bob},{x:ox+4,y:cy+bob}],true);
+        // Upper-face glow
+        g.fillStyle(0xffffff,0.28);
+        g.fillPoints([{x:cx,y:5+bob},{x:cx+3,y:cy-1+bob},{x:cx,y:cy-2+bob},{x:cx-3,y:cy-1+bob}],true);
+        // Wing tips
+        g.fillStyle(0xffffff,0.5);
+        g.fillRect(cx-1,1+bob,2,2); g.fillRect(cx-1,s-3+bob,2,2);
+        // Center core
+        g.fillStyle(0x220000,1); g.fillCircle(cx,cy+bob,3);
+        g.fillStyle(0xffcc00,1); g.fillCircle(cx,cy+bob,2);
+        g.fillStyle(0xffffff,1); g.fillCircle(cx,cy-1+bob,1);
       } else {
         const cx=ox+s/2, cy=s/2;
+        // Outer hull
         g.fillStyle(c.dark,1); g.fillCircle(cx,cy+bob,s/2-1);
-        g.fillStyle(c.col,1);  g.fillCircle(cx,cy-1+bob,s/2-3);
-        g.lineStyle(2,c.dark,1); g.strokeCircle(cx,cy-1+bob,s/2-7);
-        g.fillStyle(0x000000,1);
-        g.fillRect(cx-7,cy-4+bob,5,5); g.fillRect(cx+2,cy-4+bob,5,5);
+        // Main armor plate
+        g.fillStyle(c.col,1); g.fillCircle(cx,cy+bob,s/2-4);
+        // Armor ring
+        g.lineStyle(2,c.dark,1); g.strokeCircle(cx,cy+bob,s/2-8);
+        // Inner ring
+        g.lineStyle(1,0x000000,0.6); g.strokeCircle(cx,cy+bob,s/2-13);
+        // Power core
+        g.fillStyle(0x220022,1); g.fillCircle(cx,cy+bob,6);
+        g.fillStyle(0x882288,0.9); g.fillCircle(cx,cy+bob,4);
+        g.fillStyle(0xdd88ff,0.7); g.fillCircle(cx,cy-1+bob,2);
+        // Eye sockets
+        g.fillStyle(0x110000,1);
+        g.fillRect(cx-8,cy-5+bob,6,6); g.fillRect(cx+2,cy-5+bob,6,6);
+        // Eye glow
         g.fillStyle(0xff0000,1);
-        g.fillRect(cx-6,cy-3+bob,3,3); g.fillRect(cx+3,cy-3+bob,3,3);
+        g.fillRect(cx-7,cy-4+bob,4,4); g.fillRect(cx+3,cy-4+bob,4,4);
+        // Eye highlight
+        g.fillStyle(0xff8888,1);
+        g.fillRect(cx-6,cy-4+bob,2,2); g.fillRect(cx+4,cy-4+bob,2,2);
       }
     }
     g.generateTexture('e_'+type,s*2,s); g.destroy();
@@ -231,6 +294,12 @@ function genBullet(scene) {
   g.generateTexture('p_blood',4,4); g.destroy();
   g=scene.add.graphics(); g.fillStyle(0xffffff,0.9); g.fillRect(0,0,4,4);
   g.generateTexture('p_white',4,4); g.destroy();
+
+  g=scene.add.graphics(); g.fillStyle(0x00ccff,0.9); g.fillCircle(3,3,3);
+  g.generateTexture('p_thrust',6,6); g.destroy();
+
+  g=scene.add.graphics(); g.fillStyle(0xff6600,1); g.fillRect(0,0,5,5);
+  g.generateTexture('p_fire',5,5); g.destroy();
 }
 
 function genHeart(scene) {
@@ -396,6 +465,8 @@ class GameScene extends Phaser.Scene {
     this.sparks=this.add.particles(0,0,'p_spark',{speed:{min:80,max:220},scale:{start:1,end:0},alpha:{start:1,end:0},lifespan:350,quantity:0,blendMode:'ADD'});
     this.bloods=this.add.particles(0,0,'p_blood',{speed:{min:60,max:160},scale:{start:1,end:0},alpha:{start:1,end:0},lifespan:400,quantity:0});
     this.whites=this.add.particles(0,0,'p_white',{speed:{min:100,max:260},scale:{start:1.5,end:0},alpha:{start:1,end:0},lifespan:300,quantity:0,blendMode:'ADD'});
+    this.thrusts=this.add.particles(0,0,'p_thrust',{speed:{min:30,max:80},scale:{start:0.8,end:0},alpha:{start:0.7,end:0},lifespan:200,quantity:0,blendMode:'ADD'});
+    this.fires=this.add.particles(0,0,'p_fire',{speed:{min:60,max:160},scale:{start:1.2,end:0},alpha:{start:1,end:0},lifespan:300,quantity:0,blendMode:'ADD'});
 
     // Player
     this.player=this.physics.add.sprite(GW/2,GH/2,'player',0);
@@ -573,7 +644,8 @@ class GameScene extends Phaser.Scene {
     b.setVelocity(Math.cos(ang)*BULLET_SPEED, Math.sin(ang)*BULLET_SPEED);
     b.body.allowGravity = false;
 
-    this.sparks.emitParticleAt(bx,by,5);
+    this.sparks.emitParticleAt(bx,by,6);
+    this.whites.emitParticleAt(bx,by,3);
 
     // Recoil
     this.tweens.add({
@@ -610,8 +682,11 @@ class GameScene extends Phaser.Scene {
 
   killEnemy(enemy) {
     SFX.explode();
-    this.bloods.emitParticleAt(enemy.x,enemy.y,10);
-    this.sparks.emitParticleAt(enemy.x,enemy.y,7);
+    const big = enemy.etype==='tank';
+    this.fires.emitParticleAt(enemy.x,enemy.y, big?16:8);
+    this.bloods.emitParticleAt(enemy.x,enemy.y, big?18:12);
+    this.sparks.emitParticleAt(enemy.x,enemy.y, big?14:8);
+    this.whites.emitParticleAt(enemy.x,enemy.y, big?8:4);
     this.popup(enemy.x,enemy.y-12,enemy.pts);
     this.score+=enemy.pts;
     this.registry.set('score',this.score);
@@ -729,6 +804,15 @@ class GameScene extends Phaser.Scene {
     const ca=this.player.anims.currentAnim?.key;
     if(moving  && ca!=='p_walk') this.player.play('p_walk');
     if(!moving && ca!=='p_idle') this.player.play('p_idle');
+
+    // Thrust trail from back of ship
+    if (moving) {
+      const tAng = this.player.rotation + Math.PI;
+      this.thrusts.emitParticleAt(
+        this.player.x + Math.cos(tAng)*11,
+        this.player.y + Math.sin(tAng)*11, 2
+      );
+    }
 
     // Aim: set rotation = angle toward mouse (gun sprite points RIGHT at rotation=0)
     const ptr=this.input.activePointer;
