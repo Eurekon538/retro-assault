@@ -87,16 +87,23 @@ All emitters use `quantity:0` and are triggered manually with `emitParticleAt(x,
 - **Adding a level**: append an entry to `LEVELS`. Enemy wave is built from `{t: type, n: count}` objects; `ivl` is spawn interval in ms.
 - **Adding an enemy type**: add to `ECFG`, add colors to `COLORS`, handle the shape in `genEnemies`, add an `ew_<type>` animation in `GameScene.create()`.
 
-## Planned: Boss system (NOT YET IMPLEMENTED)
+## Boss system
 
-Level flow after bosses are added:
+Level flow:
 ```
-Level 1 → Level 2 → BOSS 1 → Level 3 → Level 4 → BOSS 2 → Level 5 → ENDBOSS
+Level 1 → Level 2 → BOSS 1 → Level 3 → Level 4 → BOSS 2 → Level 5 → ENDBOSS → VICTORY
 ```
 
-Boss specs:
-- **BOSS 1** (after Level 2): large Grunt-type, high HP (~20), Spread-Shot (3 bullets at ±20°)
-- **BOSS 2** (after Level 4): fast Tank-type, high HP (~30), Charge-Attack (dash at player)
-- **ENDBOSS** (after Level 5): combined patterns — Spread + Charge, highest HP (~50)
+| Key (in `BCFG`) | When | Name | HP | Pattern |
+|---|---|---|---|---|
+| `boss1` | After Level 2 (lvlIdx 1) | WARLORD     | 20 | Spread (3 bullets ±20°, +2 outer bullets in phase 2) |
+| `boss2` | After Level 4 (lvlIdx 3) | JUGGERNAUT  | 30 | Charge (dash at player, ~620–750ms) |
+| `end`   | After Level 5 (lvlIdx 4) | OVERLORD    | 50 | Both — alternates spread and charge |
 
-Implementation approach: dedicated `BossScene` that `GameScene` transitions to instead of `LevelCompleteScene` when `lvlIdx` matches a boss trigger (after level index 1, 3, 5). BossScene reuses the same player controls + UIScene pattern. On boss death → `LevelCompleteScene`.
+Routing: `BOSS_AFTER = { 1:'boss1', 3:'boss2', 4:'end' }` in Section 1. `GameScene.checkDone()` checks the map after the wave is cleared and starts `BossScene` if a key matches.
+
+Phase 2 triggers automatically at HP ≤ maxHP/2 (faster attacks, wider spread). On boss death `BossScene` transitions to `LevelCompleteScene` (with `fromBoss:true` so the title reads "BOSS DEFEATED!"), or `GameOverScene` with `win:true` for the endboss.
+
+Boss UI: `UIScene` reads `bossMode`/`level`/`left`/`total` from the registry — wave bar turns red and shows `BOSS HP: x/y`; level text shows the boss name (e.g. "OVERLORD") in red.
+
+**Adding a new boss**: add entry to `BCFG`, add a case in `genBoss()` (Section 2) for its `shape`, then add a `BOSS_AFTER[lvlIdx]` entry. Patterns supported: `'spread'`, `'charge'`, `'both'`.
