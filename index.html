@@ -1075,8 +1075,9 @@ class BossScene extends Phaser.Scene {
     this.player.hp=this.playerHP;
     this.player.play('p_idle');
 
-    // Boss — start above visible area, fly in
-    this.boss=this.physics.add.sprite(GW/2,-bc.sz,'boss_'+this.bossKey,0);
+    // Boss — spawn INSIDE world bounds (was -bc.sz which caused Phaser to
+    // disable the body). Fade in via alpha + small y-bob instead.
+    this.boss=this.physics.add.sprite(GW/2, 140, 'boss_'+this.bossKey, 0);
     this.boss.setDepth(8);
     this.boss.hp=bc.hp; this.boss.maxhp=bc.hp;
     this.boss.setBodySize(bc.sz*0.78, bc.sz*0.78);
@@ -1084,7 +1085,11 @@ class BossScene extends Phaser.Scene {
     this.boss.phase=1; this.boss.intro=true;
     this.boss.nextAttack=0; this.boss.chargingUntil=0;
     this.boss.chargeAngle=0; this.boss.attackToggle=0;
-    if (this.boss.body) this.boss.body.setAllowGravity(false);
+    this.boss.setAlpha(0);
+    if (this.boss.body) {
+      this.boss.body.setAllowGravity(false);
+      this.boss.setCollideWorldBounds(true);
+    }
 
     // Boss bobbing animation
     if(!this.anims.exists('bw_'+this.bossKey)) {
@@ -1092,11 +1097,11 @@ class BossScene extends Phaser.Scene {
     }
     this.boss.play('bw_'+this.bossKey);
 
-    // Boss intro
+    // Boss intro: alpha fade-in + slight scale pop
+    this.boss.setScale(0.5);
     this.tweens.add({
-      targets:this.boss, y:140, duration:1600, ease:'Cubic.easeOut',
+      targets:this.boss, alpha:1, scale:1, duration:1400, ease:'Cubic.easeOut',
       onComplete: () => {
-        this.boss.setCollideWorldBounds(true);
         this.boss.intro=false;
         this.boss.nextAttack=this.time.now+1200;
       }
@@ -1177,12 +1182,16 @@ class BossScene extends Phaser.Scene {
   }
 
   spawnBossBullet(ang) {
+    if (!this.boss || !this.boss.bossCfg) return;
     const bx = this.boss.x + Math.cos(ang)*(this.boss.bossCfg.sz/2 + 4);
     const by = this.boss.y + Math.sin(ang)*(this.boss.bossCfg.sz/2 + 4);
     const b = this.ebullets.create(bx, by, 'ebullet');
+    if (!b) return;
     b.setDepth(7);
-    b.setVelocity(Math.cos(ang)*BOSS_BULLET_SPEED, Math.sin(ang)*BOSS_BULLET_SPEED);
-    b.body.allowGravity = false;
+    if (b.body) {
+      b.setVelocity(Math.cos(ang)*BOSS_BULLET_SPEED, Math.sin(ang)*BOSS_BULLET_SPEED);
+      b.body.allowGravity = false;
+    }
     this.sparks.emitParticleAt(bx,by,2);
   }
 
@@ -1221,7 +1230,7 @@ class BossScene extends Phaser.Scene {
   }
 
   hitBoss(bullet, boss) {
-    if (!bullet.active || !boss.active || this.dead) return;
+    if (!bullet || !bullet.active || !boss || !boss.active || this.dead) return;
     // Destroy bullet even during intro so it doesn't keep colliding
     const bx = bullet.x, by = bullet.y;
     bullet.destroy();
@@ -1444,23 +1453,18 @@ class BossScene extends Phaser.Scene {
       return;
     }
 
-    // BAILOUT: If physics bodies have vanished (Phaser shut down the scene
-    // mid-frame, or something destroyed the sprites), skip this frame to
-    // avoid an infinite crash loop. Log once so we can see WHEN this starts.
-    if (!this.player || !this.player.body || !this.boss || !this.boss.body) {
-      if (!this._bodyMissingLogged) {
-        this._bodyMissingLogged = true;
-        console.error('[BossScene] bodies missing!', {
-          hasPlayer: !!this.player,
-          playerBody: !!(this.player && this.player.body),
-          hasBoss: !!this.boss,
-          bossBody: !!(this.boss && this.boss.body),
-          dead: this.dead,
-          transitioning: this.transitioning
-        });
-      }
-      return;
+    // Granular safety: log if any body vanished, but continue with whatever
+    // is still alive so the user can at least move/shoot.
+    const playerOK = !!(this.player && this.player.body);
+    const bossOK   = !!(this.boss && this.boss.body);
+    if ((!playerOK || !bossOK) && !this._bodyMissingLogged) {
+      this._bodyMissingLogged = true;
+      console.error('[BossScene] body missing!', {
+        playerOK, bossOK, dead: this.dead, transitioning: this.transitioning
+      });
     }
+    // If even the player is gone, nothing useful to do this frame.
+    if (!playerOK) return;
 
     // Expire timed effects
     const now=this.time.now;
@@ -1510,8 +1514,8 @@ class BossScene extends Phaser.Scene {
     this.hair.setPosition(ptr.x,ptr.y);
     if (this.input.activePointer.leftButtonDown()) this.fireBullet();
 
-    // Boss AI
-    if (this.boss.active && !this.boss.intro) {
+    // Boss AI — only run if boss has a body (otherwise player keeps moving)
+    if (bossOK && this.boss.active && !this.boss.intro) {
       // Safety: if HP somehow dropped to 0 without triggering killBoss, do it now
       if (this.boss.hp <= 0) { this.killBoss(); return; }
       const bc = this.boss.bossCfg;
