@@ -96,9 +96,9 @@ Level 1 → Level 2 → BOSS 1 → Level 3 → Level 4 → BOSS 2 → Level 5 �
 
 | Key (in `BCFG`) | When | Name | HP | Pattern |
 |---|---|---|---|---|
-| `boss1` | After Level 2 (lvlIdx 1) | WARLORD     | 20 | Spread (3 bullets ±20°, +2 outer bullets in phase 2) |
-| `boss2` | After Level 4 (lvlIdx 3) | JUGGERNAUT  | 30 | Charge (dash at player, ~620–750ms) |
-| `end`   | After Level 5 (lvlIdx 4) | OVERLORD    | 50 | Both — alternates spread and charge |
+| `boss1` | After Level 2 (lvlIdx 1) | WARLORD     | 50  | Spread (3 bullets ±20°, +2 outer bullets in phase 2) |
+| `boss2` | After Level 4 (lvlIdx 3) | JUGGERNAUT  | 75  | Charge (dash at player, ~620–750ms) |
+| `end`   | After Level 5 (lvlIdx 4) | OVERLORD    | 120 | Both — alternates spread and charge |
 
 Routing: `BOSS_AFTER = { 1:'boss1', 3:'boss2', 4:'end' }` in Section 1. `GameScene.checkDone()` checks the map after the wave is cleared and starts `BossScene` if a key matches.
 
@@ -107,3 +107,11 @@ Phase 2 triggers automatically at HP ≤ maxHP/2 (faster attacks, wider spread).
 Boss UI: `UIScene` reads `bossMode`/`level`/`left`/`total` from the registry — wave bar turns red and shows `BOSS HP: x/y`; level text shows the boss name (e.g. "OVERLORD") in red.
 
 **Adding a new boss**: add entry to `BCFG`, add a case in `genBoss()` (Section 2) for its `shape`, then add a `BOSS_AFTER[lvlIdx]` entry. Patterns supported: `'spread'`, `'charge'`, `'both'`.
+
+## Lives + HP system
+
+- Player starts with `START_LIVES` (3) lives and `MAX_HP` (5) HP per life.
+- On death: if `lives > 0`, the current scene (GameScene or BossScene) restarts via `scene.start()` with full HP and `lives-1`. Boss fights restart with the boss at full HP.
+- On `lives < 0`: real Game Over, transition to `GameOverScene`.
+- `lives` flows through every scene transition in the `data` object, alongside `score` and `playerHP`. UIScene reads `lives` from `this.registry` and shows it as `xN` (red when ≤1) next to the hearts.
+- The `health` power-up gives `+1 HP` when HP < MAX_HP, otherwise gives `+1 LIFE` (bonus life). This makes the power-up always useful.

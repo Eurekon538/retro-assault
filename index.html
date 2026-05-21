@@ -61,10 +61,13 @@ const LEVELS = [
 
 // Boss configs. Pattern: 'spread' = 3-bullet spread; 'charge' = dash at player; 'both' = alternates.
 const BCFG = {
-  boss1: { hp:20, speed:65,  sz:80,  name:'WARLORD',    col:COLORS.grunt, dark:COLORS.gruntDark, pattern:'spread', shape:'square' },
-  boss2: { hp:30, speed:95,  sz:88,  name:'JUGGERNAUT', col:COLORS.tank,  dark:COLORS.tankDark,  pattern:'charge', shape:'circle' },
-  end:   { hp:50, speed:80,  sz:100, name:'OVERLORD',   col:COLORS.boss,  dark:COLORS.bossDark,  pattern:'both',   shape:'hex'    },
+  boss1: { hp:50,  speed:65,  sz:80,  name:'WARLORD',    col:COLORS.grunt, dark:COLORS.gruntDark, pattern:'spread', shape:'square' },
+  boss2: { hp:75,  speed:95,  sz:88,  name:'JUGGERNAUT', col:COLORS.tank,  dark:COLORS.tankDark,  pattern:'charge', shape:'circle' },
+  end:   { hp:120, speed:80,  sz:100, name:'OVERLORD',   col:COLORS.boss,  dark:COLORS.bossDark,  pattern:'both',   shape:'hex'    },
 };
+
+const START_LIVES = 3;
+const MAX_HP      = 5;
 
 // Which boss key follows each level (by lvlIdx). lvl 2 (idx 1) -> boss1, lvl 4 (idx 3) -> boss2, lvl 5 (idx 4) -> end.
 const BOSS_AFTER = { 1:'boss1', 3:'boss2', 4:'end' };
@@ -547,7 +550,7 @@ class MenuScene extends Phaser.Scene {
   go() {
     SFX.music.stop();
     this.cameras.main.fadeOut(400,0,0,0);
-    this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('GameScene',{level:0,score:0,playerHP:5}));
+    this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('GameScene',{level:0,score:0,playerHP:MAX_HP,lives:START_LIVES}));
   }
 
   update(_t,dt) {
@@ -572,7 +575,8 @@ class GameScene extends Phaser.Scene {
   init(data) {
     this.lvlIdx   = data.level    || 0;
     this.score    = data.score    || 0;
-    this.playerHP = data.playerHP !== undefined ? data.playerHP : 5;
+    this.playerHP = data.playerHP !== undefined ? data.playerHP : MAX_HP;
+    this.lives    = data.lives    !== undefined ? data.lives    : START_LIVES;
   }
 
   create() {
@@ -643,10 +647,12 @@ class GameScene extends Phaser.Scene {
     this.dmgRect=this.add.rectangle(GW/2,GH/2,GW,GH,0xff0000,0).setDepth(200);
     this.registry.set('score',    this.score);
     this.registry.set('playerHP', this.playerHP);
+    this.registry.set('lives',    this.lives);
     this.registry.set('level',    this.lvlIdx+1);
     this.registry.set('left',     this.totalEn);
     this.registry.set('total',    this.totalEn);
     this.registry.set('fx',       this.fx);
+    this.registry.set('bossMode', false);
 
     this.scene.launch('UIScene');
     this.showAlert(ld.alert||('LEVEL '+(this.lvlIdx+1)), ld.alert?0xffdd00:0x44ff66);
@@ -705,10 +711,20 @@ class GameScene extends Phaser.Scene {
     const now = this.time.now;
     switch(type) {
       case 'health':
-        if(player.hp < 5) {
+        if(player.hp < MAX_HP) {
           player.hp++;
           this.registry.set('playerHP', player.hp);
           this.cameras.main.flash(200, 0, 255, 80);
+        } else {
+          // HP already full → bonus life
+          this.lives++;
+          this.registry.set('lives', this.lives);
+          this.cameras.main.flash(250, 255, 200, 80);
+          const ex = this.add.text(pu.x, pu.y-32, '+1 LIFE!', {
+            fontSize:'20px', fontFamily:'monospace', color:'#ffdd44', stroke:'#000', strokeThickness:3
+          }).setOrigin(0.5).setDepth(161);
+          this.tweens.add({ targets:ex, y:pu.y-80, alpha:0, duration:1000,
+            onComplete:()=>ex.destroy() });
         }
         break;
       case 'speed':
@@ -881,8 +897,8 @@ class GameScene extends Phaser.Scene {
       this.scene.stop('UIScene');
       this.cameras.main.fadeOut(500,0,0,0);
       this.cameras.main.once('camerafadeoutcomplete',()=>{
-        if(bossKey) this.scene.start('BossScene',{bossKey,lvlIdx:this.lvlIdx,score:this.score,playerHP:this.player.hp});
-        else        this.scene.start('LevelCompleteScene',{score:this.score,level:this.lvlIdx,playerHP:this.player.hp});
+        if(bossKey) this.scene.start('BossScene',{bossKey,lvlIdx:this.lvlIdx,score:this.score,playerHP:this.player.hp,lives:this.lives});
+        else        this.scene.start('LevelCompleteScene',{score:this.score,level:this.lvlIdx,playerHP:this.player.hp,lives:this.lives});
       });
     });
   }
@@ -892,16 +908,31 @@ class GameScene extends Phaser.Scene {
     this.dead=true;
     this.player.setVelocity(0,0);
     this.sparks.emitParticleAt(this.player.x,this.player.y,20);
+    this.fires.emitParticleAt(this.player.x,this.player.y,12);
     this.whites.emitParticleAt(this.player.x,this.player.y,16);
     this.player.setVisible(false);
     this.cameras.main.shake(500,0.02);
     this.saveBest();
-    this.time.delayedCall(1200,()=>{
-      this.scene.stop('UIScene');
-      this.cameras.main.fadeOut(600,0,0,0);
-      this.cameras.main.once('camerafadeoutcomplete',()=>
-        this.scene.start('GameOverScene',{score:this.score,level:this.lvlIdx+1,win:false}));
-    });
+
+    const remaining = this.lives - 1;
+    if (remaining < 0) {
+      // No lives left → final game over
+      this.time.delayedCall(1200,()=>{
+        this.scene.stop('UIScene');
+        this.cameras.main.fadeOut(600,0,0,0);
+        this.cameras.main.once('camerafadeoutcomplete',()=>
+          this.scene.start('GameOverScene',{score:this.score,level:this.lvlIdx+1,win:false}));
+      });
+    } else {
+      // Respawn in the same level with full HP
+      this.showAlert(`LIFE LOST  —  ${remaining} LEFT`, 0xff6644);
+      this.time.delayedCall(1400,()=>{
+        this.scene.stop('UIScene');
+        this.cameras.main.fadeOut(500,0,0,0);
+        this.cameras.main.once('camerafadeoutcomplete',()=>
+          this.scene.start('GameScene',{level:this.lvlIdx,score:this.score,playerHP:MAX_HP,lives:remaining}));
+      });
+    }
   }
 
   saveBest() {
@@ -1007,7 +1038,8 @@ class BossScene extends Phaser.Scene {
     this.bossKey  = data.bossKey;
     this.lvlIdx   = data.lvlIdx;
     this.score    = data.score    || 0;
-    this.playerHP = data.playerHP !== undefined ? data.playerHP : 5;
+    this.playerHP = data.playerHP !== undefined ? data.playerHP : MAX_HP;
+    this.lives    = data.lives    !== undefined ? data.lives    : START_LIVES;
   }
 
   create() {
@@ -1083,6 +1115,7 @@ class BossScene extends Phaser.Scene {
     this.dmgRect=this.add.rectangle(GW/2,GH/2,GW,GH,0xff0000,0).setDepth(200);
     this.registry.set('score',    this.score);
     this.registry.set('playerHP', this.playerHP);
+    this.registry.set('lives',    this.lives);
     this.registry.set('level',    bc.name);
     this.registry.set('left',     bc.hp);
     this.registry.set('total',    bc.hp);
@@ -1178,14 +1211,17 @@ class BossScene extends Phaser.Scene {
   }
 
   hitBoss(bullet, boss) {
-    if (boss.intro || !bullet.active || !boss.active) return;
+    if (!bullet.active || !boss.active || this.dead) return;
+    // Destroy bullet even during intro so it doesn't keep colliding
+    const bx = bullet.x, by = bullet.y;
     bullet.destroy();
+    if (boss.intro) return;
     boss.hp--;
     boss.setTint(0xffffff);
     this.time.delayedCall(80, () => { if(boss.active) boss.clearTint(); });
-    this.registry.set('left', boss.hp);
+    this.registry.set('left', Math.max(0, boss.hp));
 
-    if (boss.hp <= boss.maxhp/2 && boss.phase === 1) {
+    if (boss.hp > 0 && boss.hp <= boss.maxhp/2 && boss.phase === 1) {
       boss.phase = 2;
       this.cameras.main.flash(300, 255, 80, 0);
       this.showAlert('PHASE 2', 0xff8800);
@@ -1194,7 +1230,7 @@ class BossScene extends Phaser.Scene {
     if (boss.hp <= 0) this.killBoss();
     else {
       SFX.hit();
-      this.bloods.emitParticleAt(boss.x, boss.y, 4);
+      this.bloods.emitParticleAt(bx, by, 4);
     }
   }
 
@@ -1234,7 +1270,7 @@ class BossScene extends Phaser.Scene {
         if (this.bossKey === 'end') {
           this.scene.start('GameOverScene', { score:this.score, level:5, win:true });
         } else {
-          this.scene.start('LevelCompleteScene', { score:this.score, level:this.lvlIdx, playerHP:this.player.hp, fromBoss:true });
+          this.scene.start('LevelCompleteScene', { score:this.score, level:this.lvlIdx, playerHP:this.player.hp, lives:this.lives, fromBoss:true });
         }
       });
     });
@@ -1247,8 +1283,9 @@ class BossScene extends Phaser.Scene {
 
   bulletHitPlayer(bullet, player) {
     if (!bullet.active || this.dead) return;
+    const bx = bullet.x, by = bullet.y;
     bullet.destroy();
-    this.whites.emitParticleAt(bullet.x, bullet.y, 4);
+    this.whites.emitParticleAt(bx, by, 4);
     this.damagePlayer();
   }
 
@@ -1290,13 +1327,27 @@ class BossScene extends Phaser.Scene {
     this.player.setVisible(false);
     this.cameras.main.shake(500, 0.02);
     this.saveBest();
-    this.time.delayedCall(1200, () => {
-      this.scene.stop('UIScene');
-      this.registry.set('bossMode', false);
-      this.cameras.main.fadeOut(600,0,0,0);
-      this.cameras.main.once('camerafadeoutcomplete',()=>
-        this.scene.start('GameOverScene',{score:this.score,level:this.lvlIdx+1,win:false}));
-    });
+
+    const remaining = this.lives - 1;
+    if (remaining < 0) {
+      this.time.delayedCall(1200, () => {
+        this.scene.stop('UIScene');
+        this.registry.set('bossMode', false);
+        this.cameras.main.fadeOut(600,0,0,0);
+        this.cameras.main.once('camerafadeoutcomplete',()=>
+          this.scene.start('GameOverScene',{score:this.score,level:this.lvlIdx+1,win:false}));
+      });
+    } else {
+      // Respawn → restart this boss fight with full HP, one fewer life
+      this.showAlert(`LIFE LOST  —  ${remaining} LEFT`, 0xff6644);
+      this.time.delayedCall(1400, () => {
+        this.scene.stop('UIScene');
+        this.registry.set('bossMode', false);
+        this.cameras.main.fadeOut(500,0,0,0);
+        this.cameras.main.once('camerafadeoutcomplete',()=>
+          this.scene.start('BossScene',{bossKey:this.bossKey,lvlIdx:this.lvlIdx,score:this.score,playerHP:MAX_HP,lives:remaining}));
+      });
+    }
   }
 
   saveBest() {
@@ -1357,6 +1408,8 @@ class BossScene extends Phaser.Scene {
 
     // Boss AI
     if (this.boss.active && !this.boss.intro) {
+      // Safety: if HP somehow dropped to 0 without triggering killBoss, do it now
+      if (this.boss.hp <= 0) { this.killBoss(); return; }
       const bc = this.boss.bossCfg;
 
       if (now < this.boss.chargingUntil) {
@@ -1406,6 +1459,7 @@ class UIScene extends Phaser.Scene {
     this.hearts=[];
     for(let i=0;i<5;i++)
       this.hearts.push(this.add.image(16+i*24,20,'heart_f').setScale(0.85));
+    this.livesTxt=this.add.text(140,20,'x3',{fontSize:'17px',fontFamily:'monospace',color:'#ffaaaa',stroke:'#000',strokeThickness:3}).setOrigin(0,0.5);
     this.scoreTxt=this.add.text(GW/2,20,'SCORE: 0',{fontSize:'18px',fontFamily:'monospace',color:'#ffffff'}).setOrigin(0.5);
     this.lvlTxt=this.add.text(GW-10,20,'LEVEL 1',{fontSize:'18px',fontFamily:'monospace',color:'#44ff66'}).setOrigin(1,0.5);
 
@@ -1424,11 +1478,13 @@ class UIScene extends Phaser.Scene {
     }
 
     this.prevHP=5;
+    this.prevLives=-1;
     this.prevFx={};
   }
 
   update() {
     const hp       = this.registry.get('playerHP')??5;
+    const lives    = this.registry.get('lives')??0;
     const score    = this.registry.get('score')??0;
     const level    = this.registry.get('level')??1;
     const left     = this.registry.get('left')??0;
@@ -1439,6 +1495,10 @@ class UIScene extends Phaser.Scene {
     if(hp!==this.prevHP) {
       this.hearts.forEach((h,i)=>h.setTexture(i<hp?'heart_f':'heart_e'));
       this.prevHP=hp;
+    }
+    if(lives!==this.prevLives) {
+      this.livesTxt.setText('x'+lives).setColor(lives<=1?'#ff4444':'#ffaaaa');
+      this.prevLives=lives;
     }
     this.scoreTxt.setText('SCORE: '+score);
 
@@ -1485,7 +1545,7 @@ class UIScene extends Phaser.Scene {
 
 class LevelCompleteScene extends Phaser.Scene {
   constructor() { super('LevelCompleteScene'); }
-  init(d) { this.lvl=d.level; this.score=d.score; this.php=d.playerHP; this.fromBoss=!!d.fromBoss; }
+  init(d) { this.lvl=d.level; this.score=d.score; this.php=d.playerHP; this.lives=d.lives!==undefined?d.lives:START_LIVES; this.fromBoss=!!d.fromBoss; }
 
   create() {
     for(let x=0;x<GW;x+=32)for(let y=0;y<GH;y+=32)this.add.image(x+16,y+16,'floor');
@@ -1495,7 +1555,7 @@ class LevelCompleteScene extends Phaser.Scene {
     const titleCol = this.fromBoss ? '#ffaa00' : '#44ff66';
     this.add.text(GW/2,170,title,{fontSize:'42px',fontFamily:'monospace',color:titleCol,stroke:'#000',strokeThickness:5}).setOrigin(0.5);
     this.add.text(GW/2,265,`SCORE: ${this.score}`,{fontSize:'30px',fontFamily:'monospace',color:'#ffff44'}).setOrigin(0.5);
-    this.add.text(GW/2,320,`HEALTH REMAINING: ${this.php} / 5`,{fontSize:'20px',fontFamily:'monospace',color:'#ff6688'}).setOrigin(0.5);
+    this.add.text(GW/2,320,`HEALTH: ${this.php} / ${MAX_HP}    LIVES: ${this.lives}`,{fontSize:'20px',fontFamily:'monospace',color:'#ff6688'}).setOrigin(0.5);
     this.add.text(GW/2,375,`PREPARE FOR LEVEL ${this.lvl+2}`,{fontSize:'20px',fontFamily:'monospace',color:'#aaaaff'}).setOrigin(0.5);
 
     // Power-up legend hint from level 2+
@@ -1516,7 +1576,7 @@ class LevelCompleteScene extends Phaser.Scene {
     if(!this.ok)return;
     this.cameras.main.fadeOut(400,0,0,0);
     this.cameras.main.once('camerafadeoutcomplete',()=>
-      this.scene.start('GameScene',{level:this.lvl+1,score:this.score,playerHP:this.php}));
+      this.scene.start('GameScene',{level:this.lvl+1,score:this.score,playerHP:this.php,lives:this.lives}));
   }
 }
 
@@ -1565,7 +1625,7 @@ class GameOverScene extends Phaser.Scene {
   restart() {
     this.cameras.main.fadeOut(400,0,0,0);
     this.cameras.main.once('camerafadeoutcomplete',()=>
-      this.scene.start('GameScene',{level:0,score:0,playerHP:5}));
+      this.scene.start('GameScene',{level:0,score:0,playerHP:MAX_HP,lives:START_LIVES}));
   }
   menu() {
     this.cameras.main.fadeOut(400,0,0,0);
