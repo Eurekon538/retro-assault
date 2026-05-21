@@ -1044,6 +1044,7 @@ class BossScene extends Phaser.Scene {
 
   create() {
     const bc = BCFG[this.bossKey];
+    console.log('[BossScene] create', { bossKey: this.bossKey, hp: bc.hp, lives: this.lives });
 
     // Floor + ominous red border
     for(let x=0;x<GW;x+=32)for(let y=0;y<GH;y+=32)this.add.image(x+16,y+16,'floor');
@@ -1055,6 +1056,7 @@ class BossScene extends Phaser.Scene {
     // State
     this.fx = { speed:false, speedEnd:0, rapid:false, rapidEnd:0, shield:false };
     this.fireCd = 0; this.invTime = 0; this.dead = false; this.transitioning = false;
+    this.switched = false; this.deathTime = 0; this.deathReason = null;
 
     // Groups
     this.bullets  = this.physics.add.group();
@@ -1227,8 +1229,10 @@ class BossScene extends Phaser.Scene {
       this.showAlert('PHASE 2', 0xff8800);
     }
 
-    if (boss.hp <= 0) this.killBoss();
-    else {
+    if (boss.hp <= 0) {
+      console.log('[BossScene] boss reached 0 HP after hit');
+      this.killBoss();
+    } else {
       SFX.hit();
       this.bloods.emitParticleAt(bx, by, 4);
     }
@@ -1237,57 +1241,74 @@ class BossScene extends Phaser.Scene {
   killBoss() {
     if (this.dead) return;
     this.dead = true;
+    this.deathTime = this.time.now;
+    this.deathReason = 'boss';
     const b = this.boss;
-    b.setVelocity(0,0);
+    console.log('[BossScene] killBoss', { hp: b && b.hp, maxhp: b && b.maxhp, bossKey: this.bossKey });
+    try {
+      if (b && b.body) b.setVelocity(0,0);
 
-    // Cascading explosions
-    for (let i=0;i<6;i++) {
-      this.time.delayedCall(i*170, ()=>{
-        if(!b.active && i>0) {/* fine */}
-        const ox = b.x + Phaser.Math.Between(-30,30);
-        const oy = b.y + Phaser.Math.Between(-30,30);
-        SFX.explode();
-        this.fires.emitParticleAt(ox,oy,16);
-        this.bloods.emitParticleAt(ox,oy,12);
-        this.whites.emitParticleAt(ox,oy,10);
-        this.sparks.emitParticleAt(ox,oy,14);
-        this.cameras.main.shake(200, 0.012);
-      });
+      // Cascading explosions
+      for (let i=0;i<6;i++) {
+        this.time.delayedCall(i*170, ()=>{
+          if (!b || !b.scene) return;
+          const ox = b.x + Phaser.Math.Between(-30,30);
+          const oy = b.y + Phaser.Math.Between(-30,30);
+          SFX.explode();
+          this.fires.emitParticleAt(ox,oy,16);
+          this.bloods.emitParticleAt(ox,oy,12);
+          this.whites.emitParticleAt(ox,oy,10);
+          this.sparks.emitParticleAt(ox,oy,14);
+          this.cameras.main.shake(200, 0.012);
+        });
+      }
+      this.time.delayedCall(900, () => { if (b && b.active) b.setVisible(false); });
+
+      const bonus = (b && b.bossCfg ? b.bossCfg.hp : 50) * 50;
+      this.score += bonus;
+      this.registry.set('score', this.score);
+      if (b) this.popup(b.x, b.y, bonus);
+      this.saveBest();
+    } catch (e) {
+      // Swallow visual errors — the update() loop will still trigger the transition.
     }
-    this.time.delayedCall(900, () => { if (b.active) b.setVisible(false); });
 
-    const bonus = b.bossCfg.hp * 50;
-    this.score += bonus;
-    this.registry.set('score', this.score);
-    this.popup(b.x, b.y, bonus);
-    this.saveBest();
-
+    // Belt-and-suspenders: schedule via Phaser timer AND raw setTimeout.
+    // update() also drives this from this.deathTime as a third backstop.
     this.time.delayedCall(1900, () => this.endBossScene(false));
+    setTimeout(() => this.endBossScene(false), 2200);
   }
 
-  // Robust scene-transition with fallback so the boss scene never soft-locks.
+  // Robust scene-transition with multiple fallbacks so the boss scene never soft-locks.
   endBossScene(playerDied) {
     if (this.transitioning) return;
     this.transitioning = true;
-    this.scene.stop('UIScene');
+    console.log('[BossScene] endBossScene', { playerDied, bossKey: this.bossKey, lvlIdx: this.lvlIdx });
+    try { this.scene.stop('UIScene'); } catch (e) {}
     this.registry.set('bossMode', false);
-    this.cameras.main.fadeOut(600, 0, 0, 0);
+    try { this.cameras.main.fadeOut(500, 0, 0, 0); } catch (e) {}
 
-    let switched = false;
-    const go = () => {
-      if (switched) return;
-      switched = true;
-      if (playerDied) {
-        this.scene.start('GameOverScene', { score:this.score, level:this.lvlIdx+1, win:false });
-      } else if (this.bossKey === 'end') {
-        this.scene.start('GameOverScene', { score:this.score, level:5, win:true });
-      } else {
-        this.scene.start('LevelCompleteScene', { score:this.score, level:this.lvlIdx, playerHP:this.player.hp, lives:this.lives, fromBoss:true });
+    const doSwitch = () => {
+      if (this.switched) return;
+      this.switched = true;
+      try {
+        if (playerDied) {
+          this.scene.start('GameOverScene', { score:this.score, level:(this.lvlIdx||0)+1, win:false });
+        } else if (this.bossKey === 'end') {
+          this.scene.start('GameOverScene', { score:this.score, level:5, win:true });
+        } else {
+          const php = (this.player && this.player.hp) ? this.player.hp : MAX_HP;
+          this.scene.start('LevelCompleteScene', { score:this.score, level:this.lvlIdx, playerHP:php, lives:this.lives, fromBoss:true });
+        }
+      } catch (e) {
+        // Last-resort fallback: bounce to menu
+        try { this.scene.start('MenuScene'); } catch (e2) {}
       }
     };
-    this.cameras.main.once('camerafadeoutcomplete', go);
-    // Fallback in case the fade event doesn't fire (e.g. camera already mid-fade)
-    this.time.delayedCall(900, go);
+    // Three independent triggers — first one wins
+    try { this.cameras.main.once('camerafadeoutcomplete', doSwitch); } catch (e) {}
+    try { this.time.delayedCall(550, doSwitch); } catch (e) {}
+    setTimeout(doSwitch, 800);
   }
 
   bossContact(boss, player) {
@@ -1334,36 +1355,50 @@ class BossScene extends Phaser.Scene {
   gameOver() {
     if (this.dead) return;
     this.dead = true;
-    this.player.setVelocity(0,0);
-    this.sparks.emitParticleAt(this.player.x,this.player.y,20);
-    this.whites.emitParticleAt(this.player.x,this.player.y,16);
-    this.fires.emitParticleAt(this.player.x,this.player.y,12);
-    this.player.setVisible(false);
-    this.cameras.main.shake(500, 0.02);
+    this.deathTime = this.time.now;
+    try {
+      this.player.setVelocity(0,0);
+      this.sparks.emitParticleAt(this.player.x,this.player.y,20);
+      this.whites.emitParticleAt(this.player.x,this.player.y,16);
+      this.fires.emitParticleAt(this.player.x,this.player.y,12);
+      this.player.setVisible(false);
+      this.cameras.main.shake(500, 0.02);
+    } catch (e) {}
     this.saveBest();
 
     const remaining = this.lives - 1;
     if (remaining < 0) {
+      this.deathReason = 'gameover';
       this.time.delayedCall(1200, () => this.endBossScene(true));
+      setTimeout(() => this.endBossScene(true), 1600);
     } else {
       // Respawn → restart this boss fight with full HP, one fewer life
+      this.deathReason = 'respawn';
+      this.respawnRemaining = remaining;
       this.showAlert(`LIFE LOST  —  ${remaining} LEFT`, 0xff6644);
-      this.time.delayedCall(1400, () => {
-        if (this.transitioning) return;
-        this.transitioning = true;
-        this.scene.stop('UIScene');
-        this.registry.set('bossMode', false);
-        this.cameras.main.fadeOut(500,0,0,0);
-        let switched = false;
-        const go = () => {
-          if (switched) return;
-          switched = true;
-          this.scene.start('BossScene',{bossKey:this.bossKey,lvlIdx:this.lvlIdx,score:this.score,playerHP:MAX_HP,lives:remaining});
-        };
-        this.cameras.main.once('camerafadeoutcomplete', go);
-        this.time.delayedCall(800, go);
-      });
+      this.time.delayedCall(1400, () => this.doBossRespawn(remaining));
+      setTimeout(() => this.doBossRespawn(remaining), 1800);
     }
+  }
+
+  doBossRespawn(remaining) {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    try { this.scene.stop('UIScene'); } catch (e) {}
+    this.registry.set('bossMode', false);
+    try { this.cameras.main.fadeOut(500,0,0,0); } catch (e) {}
+    const go = () => {
+      if (this.switched) return;
+      this.switched = true;
+      try {
+        this.scene.start('BossScene',{bossKey:this.bossKey,lvlIdx:this.lvlIdx,score:this.score,playerHP:MAX_HP,lives:remaining});
+      } catch (e) {
+        try { this.scene.start('MenuScene'); } catch (e2) {}
+      }
+    };
+    try { this.cameras.main.once('camerafadeoutcomplete', go); } catch (e) {}
+    try { this.time.delayedCall(550, go); } catch (e) {}
+    setTimeout(go, 800);
   }
 
   saveBest() {
@@ -1372,7 +1407,16 @@ class BossScene extends Phaser.Scene {
   }
 
   update(time, dt) {
-    if (this.dead) return;
+    if (this.dead) {
+      // Update-loop backstop: if a transition was scheduled but didn't fire
+      // (delayedCall + setTimeout both failed), force it from here.
+      if (!this.transitioning && this.deathTime && this.time.now - this.deathTime > 2500) {
+        if (this.deathReason === 'boss')       this.endBossScene(false);
+        else if (this.deathReason === 'gameover') this.endBossScene(true);
+        else if (this.deathReason === 'respawn')  this.doBossRespawn(this.respawnRemaining);
+      }
+      return;
+    }
 
     // Expire timed effects
     const now=this.time.now;
