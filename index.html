@@ -1130,6 +1130,13 @@ class BossScene extends Phaser.Scene {
     this.showAlert(lab+': '+bc.name, 0xff4444);
     this.cameras.main.fadeIn(400);
     this.cameras.main.shake(500, 0.005);
+
+    // ---- DEBUG OVERLAY (temporary) ----
+    this.dbgFires = 0; this.dbgHits = 0;
+    this.dbgText = this.add.text(8, GH-60,
+      'DEBUG\nBoss HP: 50/50\nPhase: 1  Intro: true\nFires: 0  Hits: 0',
+      { fontSize:'12px', fontFamily:'monospace', color:'#00ff88', backgroundColor:'#000000aa', padding:{x:4,y:2} }
+    ).setDepth(500);
   }
 
   showAlert(msg, col) {
@@ -1160,6 +1167,7 @@ class BossScene extends Phaser.Scene {
     b.body.allowGravity = false;
     this.sparks.emitParticleAt(bx,by,6);
     this.whites.emitParticleAt(bx,by,3);
+    this.dbgFires = (this.dbgFires||0) + 1;
     this.tweens.add({
       targets:this.player,
       x: this.player.x - Math.cos(ang)*4,
@@ -1217,6 +1225,7 @@ class BossScene extends Phaser.Scene {
     // Destroy bullet even during intro so it doesn't keep colliding
     const bx = bullet.x, by = bullet.y;
     bullet.destroy();
+    this.dbgHits = (this.dbgHits||0) + 1;
     if (boss.intro) return;
     boss.hp--;
     boss.setTint(0xffffff);
@@ -1356,6 +1365,7 @@ class BossScene extends Phaser.Scene {
     if (this.dead) return;
     this.dead = true;
     this.deathTime = this.time.now;
+    console.log('[BossScene] gameOver — player died', { lives: this.lives });
     try {
       this.player.setVelocity(0,0);
       this.sparks.emitParticleAt(this.player.x,this.player.y,20);
@@ -1384,6 +1394,7 @@ class BossScene extends Phaser.Scene {
   doBossRespawn(remaining) {
     if (this.transitioning) return;
     this.transitioning = true;
+    console.log('[BossScene] doBossRespawn', { remaining, bossKey: this.bossKey });
     try { this.scene.stop('UIScene'); } catch (e) {}
     this.registry.set('bossMode', false);
     try { this.cameras.main.fadeOut(500,0,0,0); } catch (e) {}
@@ -1407,10 +1418,22 @@ class BossScene extends Phaser.Scene {
   }
 
   update(time, dt) {
+    // Update debug overlay
+    if (this.dbgText && this.boss) {
+      this.dbgText.setText(
+        'DEBUG\n' +
+        'Boss HP: ' + this.boss.hp + '/' + this.boss.maxhp + '\n' +
+        'Phase: ' + this.boss.phase + '  Intro: ' + this.boss.intro + '\n' +
+        'Fires: ' + (this.dbgFires||0) + '  Hits: ' + (this.dbgHits||0) + '\n' +
+        'Dead: ' + this.dead + '  Trans: ' + this.transitioning
+      );
+    }
+
     if (this.dead) {
       // Update-loop backstop: if a transition was scheduled but didn't fire
       // (delayedCall + setTimeout both failed), force it from here.
       if (!this.transitioning && this.deathTime && this.time.now - this.deathTime > 2500) {
+        console.log('[BossScene] update backstop firing', this.deathReason);
         if (this.deathReason === 'boss')       this.endBossScene(false);
         else if (this.deathReason === 'gameover') this.endBossScene(true);
         else if (this.deathReason === 'respawn')  this.doBossRespawn(this.respawnRemaining);
