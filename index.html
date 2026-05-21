@@ -1419,13 +1419,16 @@ class BossScene extends Phaser.Scene {
 
   update(time, dt) {
     // Update debug overlay
-    if (this.dbgText && this.boss) {
+    if (this.dbgText) {
+      const pBody = this.player && this.player.body ? 'OK' : 'NULL';
+      const bBody = this.boss && this.boss.body ? 'OK' : 'NULL';
       this.dbgText.setText(
         'DEBUG\n' +
-        'Boss HP: ' + this.boss.hp + '/' + this.boss.maxhp + '\n' +
-        'Phase: ' + this.boss.phase + '  Intro: ' + this.boss.intro + '\n' +
+        'Boss HP: ' + (this.boss ? this.boss.hp + '/' + this.boss.maxhp : '-') + '\n' +
+        'Phase: ' + (this.boss ? this.boss.phase : '-') + '  Intro: ' + (this.boss ? this.boss.intro : '-') + '\n' +
         'Fires: ' + (this.dbgFires||0) + '  Hits: ' + (this.dbgHits||0) + '\n' +
-        'Dead: ' + this.dead + '  Trans: ' + this.transitioning
+        'Dead: ' + this.dead + '  Trans: ' + this.transitioning + '\n' +
+        'P.body: ' + pBody + '  B.body: ' + bBody
       );
     }
 
@@ -1437,6 +1440,24 @@ class BossScene extends Phaser.Scene {
         if (this.deathReason === 'boss')       this.endBossScene(false);
         else if (this.deathReason === 'gameover') this.endBossScene(true);
         else if (this.deathReason === 'respawn')  this.doBossRespawn(this.respawnRemaining);
+      }
+      return;
+    }
+
+    // BAILOUT: If physics bodies have vanished (Phaser shut down the scene
+    // mid-frame, or something destroyed the sprites), skip this frame to
+    // avoid an infinite crash loop. Log once so we can see WHEN this starts.
+    if (!this.player || !this.player.body || !this.boss || !this.boss.body) {
+      if (!this._bodyMissingLogged) {
+        this._bodyMissingLogged = true;
+        console.error('[BossScene] bodies missing!', {
+          hasPlayer: !!this.player,
+          playerBody: !!(this.player && this.player.body),
+          hasBoss: !!this.boss,
+          bossBody: !!(this.boss && this.boss.body),
+          dead: this.dead,
+          transitioning: this.transitioning
+        });
       }
       return;
     }
