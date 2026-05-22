@@ -1488,9 +1488,11 @@ class UIScene extends Phaser.Scene {
 
   create() {
     this.add.rectangle(GW/2,20,GW,40,0x000000,0.65);
-    this.heart=this.add.image(20,20,'heart_f').setScale(1.0);
-    this.hpTxt=this.add.text(36,20,'5/5',{fontSize:'17px',fontFamily:'monospace',color:'#ff8899',stroke:'#000',strokeThickness:3}).setOrigin(0,0.5);
-    this.livesTxt=this.add.text(96,20,'×3',{fontSize:'19px',fontFamily:'monospace',color:'#ffdd66',stroke:'#000',strokeThickness:3}).setOrigin(0,0.5);
+    this.hearts=[];
+    for(let i=0;i<MAX_HP;i++){
+      this.hearts.push(this.add.image(14+i*22,20,'heart_f').setScale(1.0));
+    }
+    this.livesTxt=this.add.text(14+MAX_HP*22+8,20,'×3',{fontSize:'19px',fontFamily:'monospace',color:'#ffdd66',stroke:'#000',strokeThickness:3}).setOrigin(0,0.5);
     this.scoreTxt=this.add.text(GW/2,20,'SCORE: 0',{fontSize:'18px',fontFamily:'monospace',color:'#ffffff'}).setOrigin(0.5);
     this.lvlTxt=this.add.text(GW-10,20,'LEVEL 1',{fontSize:'18px',fontFamily:'monospace',color:'#44ff66'}).setOrigin(1,0.5);
 
@@ -1508,7 +1510,7 @@ class UIScene extends Phaser.Scene {
       );
     }
 
-    this.prevHP=5;
+    this.prevHP=-1;
     this.prevLives=-1;
     this.prevFx={};
   }
@@ -1524,8 +1526,7 @@ class UIScene extends Phaser.Scene {
     const bossMode = this.registry.get('bossMode')||false;
 
     if(hp!==this.prevHP) {
-      this.hpTxt.setText(hp+'/5').setColor(hp<=1?'#ff4444':(hp<=2?'#ffaa44':'#ff8899'));
-      this.heart.setTexture(hp>0?'heart_f':'heart_e');
+      this.hearts.forEach((h,i)=>h.setTexture(i<hp?'heart_f':'heart_e'));
       this.prevHP=hp;
     }
     if(lives!==this.prevLives) {
