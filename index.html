@@ -1044,7 +1044,6 @@ class BossScene extends Phaser.Scene {
 
   create() {
     const bc = BCFG[this.bossKey];
-    console.log('[BossScene] create', { bossKey: this.bossKey, hp: bc.hp, lives: this.lives });
 
     // Floor + ominous red border
     for(let x=0;x<GW;x+=32)for(let y=0;y<GH;y+=32)this.add.image(x+16,y+16,'floor');
@@ -1056,7 +1055,7 @@ class BossScene extends Phaser.Scene {
     // State
     this.fx = { speed:false, speedEnd:0, rapid:false, rapidEnd:0, shield:false };
     this.fireCd = 0; this.invTime = 0; this.dead = false; this.transitioning = false;
-    this.switched = false; this.deathTime = 0; this.deathReason = null;
+    this.switched = false;
 
     // Groups
     this.bullets  = this.physics.add.group();
@@ -1069,15 +1068,19 @@ class BossScene extends Phaser.Scene {
     this.thrusts=this.add.particles(0,0,'p_thrust',{speed:{min:30,max:80},scale:{start:0.8,end:0},alpha:{start:0.7,end:0},lifespan:200,quantity:0,blendMode:'ADD'});
     this.fires=this.add.particles(0,0,'p_fire',{speed:{min:60,max:160},scale:{start:1.2,end:0},alpha:{start:1,end:0},lifespan:300,quantity:0,blendMode:'ADD'});
 
-    // Player
-    this.player=this.physics.add.sprite(GW/2,GH-100,'player',0);
+    // Player — created via a physics GROUP, same proven pattern as the boss.
+    // Direct physics.add.sprite() was losing its body mid-fight (player froze).
+    this.playerGroup = this.physics.add.group();
+    this.player = this.playerGroup.create(GW/2, GH-100, 'player', 0);
     this.player.setCollideWorldBounds(true).setDepth(10);
     this.player.hp=this.playerHP;
     this.player.play('p_idle');
 
-    // Boss — spawn INSIDE world bounds (was -bc.sz which caused Phaser to
-    // disable the body). Fade in via alpha + small y-bob instead.
-    this.boss=this.physics.add.sprite(GW/2, 140, 'boss_'+this.bossKey, 0);
+    // Boss — created via a physics GROUP, matching the proven enemy/bullet
+    // pattern (CLAUDE.md invariant). Direct physics.add.sprite() was losing
+    // its body, which silently broke bullet collision and the AI.
+    this.bossGroup = this.physics.add.group();
+    this.boss = this.bossGroup.create(GW/2, 140, 'boss_'+this.bossKey, 0);
     this.boss.setDepth(8);
     this.boss.hp=bc.hp; this.boss.maxhp=bc.hp;
     this.boss.setBodySize(bc.sz*0.78, bc.sz*0.78);
@@ -1086,10 +1089,8 @@ class BossScene extends Phaser.Scene {
     this.boss.nextAttack=0; this.boss.chargingUntil=0;
     this.boss.chargeAngle=0; this.boss.attackToggle=0;
     this.boss.setAlpha(0);
-    if (this.boss.body) {
-      this.boss.body.setAllowGravity(false);
-      this.boss.setCollideWorldBounds(true);
-    }
+    this.boss.body.setAllowGravity(false);
+    this.boss.setCollideWorldBounds(true);
 
     // Boss bobbing animation
     if(!this.anims.exists('bw_'+this.bossKey)) {
@@ -1114,9 +1115,9 @@ class BossScene extends Phaser.Scene {
     this.wasd=this.input.keyboard.addKeys('W,A,S,D');
 
     // Collisions
-    this.physics.add.overlap(this.bullets,  this.boss,   this.hitBoss,         null, this);
-    this.physics.add.overlap(this.boss,     this.player, this.bossContact,     null, this);
-    this.physics.add.overlap(this.ebullets, this.player, this.bulletHitPlayer, null, this);
+    this.physics.add.overlap(this.bullets,   this.bossGroup,   this.hitBoss,         null, this);
+    this.physics.add.overlap(this.bossGroup, this.playerGroup, this.bossContact,     null, this);
+    this.physics.add.overlap(this.ebullets,  this.playerGroup, this.bulletHitPlayer, null, this);
 
     // HUD overlay
     this.dmgRect=this.add.rectangle(GW/2,GH/2,GW,GH,0xff0000,0).setDepth(200);
@@ -1135,13 +1136,6 @@ class BossScene extends Phaser.Scene {
     this.showAlert(lab+': '+bc.name, 0xff4444);
     this.cameras.main.fadeIn(400);
     this.cameras.main.shake(500, 0.005);
-
-    // ---- DEBUG OVERLAY (temporary) ----
-    this.dbgFires = 0; this.dbgHits = 0;
-    this.dbgText = this.add.text(8, GH-60,
-      'DEBUG\nBoss HP: 50/50\nPhase: 1  Intro: true\nFires: 0  Hits: 0',
-      { fontSize:'12px', fontFamily:'monospace', color:'#00ff88', backgroundColor:'#000000aa', padding:{x:4,y:2} }
-    ).setDepth(500);
   }
 
   showAlert(msg, col) {
@@ -1172,7 +1166,6 @@ class BossScene extends Phaser.Scene {
     b.body.allowGravity = false;
     this.sparks.emitParticleAt(bx,by,6);
     this.whites.emitParticleAt(bx,by,3);
-    this.dbgFires = (this.dbgFires||0) + 1;
     this.tweens.add({
       targets:this.player,
       x: this.player.x - Math.cos(ang)*4,
@@ -1234,7 +1227,6 @@ class BossScene extends Phaser.Scene {
     // Destroy bullet even during intro so it doesn't keep colliding
     const bx = bullet.x, by = bullet.y;
     bullet.destroy();
-    this.dbgHits = (this.dbgHits||0) + 1;
     if (boss.intro) return;
     boss.hp--;
     boss.setTint(0xffffff);
@@ -1248,7 +1240,6 @@ class BossScene extends Phaser.Scene {
     }
 
     if (boss.hp <= 0) {
-      console.log('[BossScene] boss reached 0 HP after hit');
       this.killBoss();
     } else {
       SFX.hit();
@@ -1259,10 +1250,7 @@ class BossScene extends Phaser.Scene {
   killBoss() {
     if (this.dead) return;
     this.dead = true;
-    this.deathTime = this.time.now;
-    this.deathReason = 'boss';
     const b = this.boss;
-    console.log('[BossScene] killBoss', { hp: b && b.hp, maxhp: b && b.maxhp, bossKey: this.bossKey });
     try {
       if (b && b.body) b.setVelocity(0,0);
 
@@ -1287,46 +1275,41 @@ class BossScene extends Phaser.Scene {
       this.registry.set('score', this.score);
       if (b) this.popup(b.x, b.y, bonus);
       this.saveBest();
-    } catch (e) {
-      // Swallow visual errors — the update() loop will still trigger the transition.
-    }
+    } catch (e) {}
 
-    // Belt-and-suspenders: schedule via Phaser timer AND raw setTimeout.
-    // update() also drives this from this.deathTime as a third backstop.
     this.time.delayedCall(1900, () => this.endBossScene(false));
-    setTimeout(() => this.endBossScene(false), 2200);
   }
 
-  // Robust scene-transition with multiple fallbacks so the boss scene never soft-locks.
-  endBossScene(playerDied) {
+  // Single guarded scene transition: fade out, then run switchFn exactly once.
+  _fadeAndSwitch(switchFn) {
     if (this.transitioning) return;
     this.transitioning = true;
-    console.log('[BossScene] endBossScene', { playerDied, bossKey: this.bossKey, lvlIdx: this.lvlIdx });
     try { this.scene.stop('UIScene'); } catch (e) {}
     this.registry.set('bossMode', false);
-    try { this.cameras.main.fadeOut(500, 0, 0, 0); } catch (e) {}
-
-    const doSwitch = () => {
+    const go = () => {
       if (this.switched) return;
       this.switched = true;
-      try {
-        if (playerDied) {
-          this.scene.start('GameOverScene', { score:this.score, level:(this.lvlIdx||0)+1, win:false });
-        } else if (this.bossKey === 'end') {
-          this.scene.start('GameOverScene', { score:this.score, level:5, win:true });
-        } else {
-          const php = (this.player && this.player.hp) ? this.player.hp : MAX_HP;
-          this.scene.start('LevelCompleteScene', { score:this.score, level:this.lvlIdx, playerHP:php, lives:this.lives, fromBoss:true });
-        }
-      } catch (e) {
-        // Last-resort fallback: bounce to menu
-        try { this.scene.start('MenuScene'); } catch (e2) {}
-      }
+      try { switchFn(); }
+      catch (e) { try { this.scene.start('MenuScene'); } catch (e2) {} }
     };
-    // Three independent triggers — first one wins
-    try { this.cameras.main.once('camerafadeoutcomplete', doSwitch); } catch (e) {}
-    try { this.time.delayedCall(550, doSwitch); } catch (e) {}
-    setTimeout(doSwitch, 800);
+    this.cameras.main.fadeOut(450, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', go);
+    // Fallback on the scene clock if the fade event is missed. Cleared on scene
+    // shutdown, so it can never fire on a freshly-started instance.
+    this.time.delayedCall(650, go);
+  }
+
+  endBossScene(playerDied) {
+    this._fadeAndSwitch(() => {
+      if (playerDied) {
+        this.scene.start('GameOverScene', { score:this.score, level:(this.lvlIdx||0)+1, win:false });
+      } else if (this.bossKey === 'end') {
+        this.scene.start('GameOverScene', { score:this.score, level:5, win:true });
+      } else {
+        const php = (this.player && this.player.hp) ? this.player.hp : MAX_HP;
+        this.scene.start('LevelCompleteScene', { score:this.score, level:this.lvlIdx, playerHP:php, lives:this.lives, fromBoss:true });
+      }
+    });
   }
 
   bossContact(boss, player) {
@@ -1373,8 +1356,6 @@ class BossScene extends Phaser.Scene {
   gameOver() {
     if (this.dead) return;
     this.dead = true;
-    this.deathTime = this.time.now;
-    console.log('[BossScene] gameOver — player died', { lives: this.lives });
     try {
       this.player.setVelocity(0,0);
       this.sparks.emitParticleAt(this.player.x,this.player.y,20);
@@ -1387,38 +1368,18 @@ class BossScene extends Phaser.Scene {
 
     const remaining = this.lives - 1;
     if (remaining < 0) {
-      this.deathReason = 'gameover';
       this.time.delayedCall(1200, () => this.endBossScene(true));
-      setTimeout(() => this.endBossScene(true), 1600);
     } else {
       // Respawn → restart this boss fight with full HP, one fewer life
-      this.deathReason = 'respawn';
-      this.respawnRemaining = remaining;
       this.showAlert(`LIFE LOST  —  ${remaining} LEFT`, 0xff6644);
       this.time.delayedCall(1400, () => this.doBossRespawn(remaining));
-      setTimeout(() => this.doBossRespawn(remaining), 1800);
     }
   }
 
   doBossRespawn(remaining) {
-    if (this.transitioning) return;
-    this.transitioning = true;
-    console.log('[BossScene] doBossRespawn', { remaining, bossKey: this.bossKey });
-    try { this.scene.stop('UIScene'); } catch (e) {}
-    this.registry.set('bossMode', false);
-    try { this.cameras.main.fadeOut(500,0,0,0); } catch (e) {}
-    const go = () => {
-      if (this.switched) return;
-      this.switched = true;
-      try {
-        this.scene.start('BossScene',{bossKey:this.bossKey,lvlIdx:this.lvlIdx,score:this.score,playerHP:MAX_HP,lives:remaining});
-      } catch (e) {
-        try { this.scene.start('MenuScene'); } catch (e2) {}
-      }
-    };
-    try { this.cameras.main.once('camerafadeoutcomplete', go); } catch (e) {}
-    try { this.time.delayedCall(550, go); } catch (e) {}
-    setTimeout(go, 800);
+    this._fadeAndSwitch(() => {
+      this.scene.start('BossScene', { bossKey:this.bossKey, lvlIdx:this.lvlIdx, score:this.score, playerHP:MAX_HP, lives:remaining });
+    });
   }
 
   saveBest() {
@@ -1427,44 +1388,7 @@ class BossScene extends Phaser.Scene {
   }
 
   update(time, dt) {
-    // Update debug overlay
-    if (this.dbgText) {
-      const pBody = this.player && this.player.body ? 'OK' : 'NULL';
-      const bBody = this.boss && this.boss.body ? 'OK' : 'NULL';
-      this.dbgText.setText(
-        'DEBUG\n' +
-        'Boss HP: ' + (this.boss ? this.boss.hp + '/' + this.boss.maxhp : '-') + '\n' +
-        'Phase: ' + (this.boss ? this.boss.phase : '-') + '  Intro: ' + (this.boss ? this.boss.intro : '-') + '\n' +
-        'Fires: ' + (this.dbgFires||0) + '  Hits: ' + (this.dbgHits||0) + '\n' +
-        'Dead: ' + this.dead + '  Trans: ' + this.transitioning + '\n' +
-        'P.body: ' + pBody + '  B.body: ' + bBody
-      );
-    }
-
-    if (this.dead) {
-      // Update-loop backstop: if a transition was scheduled but didn't fire
-      // (delayedCall + setTimeout both failed), force it from here.
-      if (!this.transitioning && this.deathTime && this.time.now - this.deathTime > 2500) {
-        console.log('[BossScene] update backstop firing', this.deathReason);
-        if (this.deathReason === 'boss')       this.endBossScene(false);
-        else if (this.deathReason === 'gameover') this.endBossScene(true);
-        else if (this.deathReason === 'respawn')  this.doBossRespawn(this.respawnRemaining);
-      }
-      return;
-    }
-
-    // Granular safety: log if any body vanished, but continue with whatever
-    // is still alive so the user can at least move/shoot.
-    const playerOK = !!(this.player && this.player.body);
-    const bossOK   = !!(this.boss && this.boss.body);
-    if ((!playerOK || !bossOK) && !this._bodyMissingLogged) {
-      this._bodyMissingLogged = true;
-      console.error('[BossScene] body missing!', {
-        playerOK, bossOK, dead: this.dead, transitioning: this.transitioning
-      });
-    }
-    // If even the player is gone, nothing useful to do this frame.
-    if (!playerOK) return;
+    if (this.dead) return;
 
     // Expire timed effects
     const now=this.time.now;
@@ -1514,8 +1438,8 @@ class BossScene extends Phaser.Scene {
     this.hair.setPosition(ptr.x,ptr.y);
     if (this.input.activePointer.leftButtonDown()) this.fireBullet();
 
-    // Boss AI — only run if boss has a body (otherwise player keeps moving)
-    if (bossOK && this.boss.active && !this.boss.intro) {
+    // Boss AI
+    if (this.boss && this.boss.active && !this.boss.intro) {
       // Safety: if HP somehow dropped to 0 without triggering killBoss, do it now
       if (this.boss.hp <= 0) { this.killBoss(); return; }
       const bc = this.boss.bossCfg;
