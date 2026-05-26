@@ -221,16 +221,14 @@ const SFX = (() => {
   };
 })();
 
-// Briefly pauses physics for "weighty" impact feel. Scene clock keeps running,
-// so timers and camera shake still play through the freeze.
+// Briefly pauses physics for "weighty" impact feel. Uses the scene clock so the
+// resume survives tab-throttling and is auto-cancelled on scene shutdown.
 function hitStop(scene, ms) {
   if (!scene || !scene.physics || !scene.physics.world) return;
   scene.physics.world.pause();
-  setTimeout(() => {
-    try {
-      if (scene.physics && scene.physics.world) scene.physics.world.resume();
-    } catch (e) {}
-  }, ms);
+  scene.time.delayedCall(ms, () => {
+    if (scene.physics && scene.physics.world) scene.physics.world.resume();
+  });
 }
 
 // ============================================================
@@ -1203,7 +1201,6 @@ class BossScene extends Phaser.Scene {
 
     SFX.bossMusic.start();
     this.events.once('shutdown', () => SFX.bossMusic.stop());
-    this.events.once('destroy',  () => SFX.bossMusic.stop());
   }
 
   showAlert(msg, col) {
