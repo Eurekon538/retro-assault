@@ -129,6 +129,44 @@ const SFX = (() => {
     _mtid = setTimeout(mTick, 25);
   }
 
+  // Boss music: A-minor, 168 BPM, driving and ominous (sawtooth lead + pounding kicks)
+  let _brun = false, _bstep = 0, _bnext = 0, _btid = null;
+  const BS_STEP = 60 / 168 / 2;
+  const BMEL = [659, 0, 587, 0, 698, 659, 587, 523, 659, 0, 587, 0, 784, 698, 659, 587];
+  const BBAS = [110, 0, 110, 0, 110, 0, 110, 0,  82, 0,  82, 0,  82, 0,  82, 0];
+  const BKIK = [  1, 0,   0, 0,   1, 0,   0, 0,   1, 0,   0, 0,   1, 0,   0, 0];
+  const BSNR = [  0, 0,   0, 0,   1, 0,   0, 0,   0, 0,   0, 0,   1, 0,   0, 0];
+
+  function bTick() {
+    if (!_brun) return;
+    const c = ac(), horizon = c.currentTime + 0.1;
+    while (_bnext < horizon) {
+      const i = _bstep % BMEL.length, t = _bnext;
+      if (BMEL[i]) tone(BMEL[i], t, BS_STEP * 0.9, 'sawtooth', 0.045);
+      if (BBAS[i]) tone(BBAS[i], t, BS_STEP * 1.9, 'triangle', 0.10);
+      if (BKIK[i]) {
+        const o = c.createOscillator(), g = c.createGain();
+        o.connect(g); g.connect(c.destination); o.type = 'sine';
+        o.frequency.setValueAtTime(180, t);
+        o.frequency.exponentialRampToValueAtTime(28, t + 0.12);
+        g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+        o.start(t); o.stop(t + 0.15);
+      }
+      if (BSNR[i]) {
+        const buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.12), c.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let j = 0; j < d.length; j++) d[j] = Math.random() * 2 - 1;
+        const src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain();
+        flt.type = 'highpass'; flt.frequency.value = 1200;
+        src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(c.destination);
+        g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+        src.start(t);
+      }
+      _bnext += BS_STEP; _bstep++;
+    }
+    _btid = setTimeout(bTick, 25);
+  }
+
   return {
     shoot() {
       const t = ac().currentTime;
@@ -171,8 +209,29 @@ const SFX = (() => {
       },
       stop() { _mrun = false; clearTimeout(_mtid); },
     },
+    bossMusic: {
+      start() {
+        if (_brun) return;
+        _brun = true; _bstep = 0;
+        _bnext = ac().currentTime + 0.05;
+        bTick();
+      },
+      stop() { _brun = false; clearTimeout(_btid); },
+    },
   };
 })();
+
+// Briefly pauses physics for "weighty" impact feel. Scene clock keeps running,
+// so timers and camera shake still play through the freeze.
+function hitStop(scene, ms) {
+  if (!scene || !scene.physics || !scene.physics.world) return;
+  scene.physics.world.pause();
+  setTimeout(() => {
+    try {
+      if (scene.physics && scene.physics.world) scene.physics.world.resume();
+    } catch (e) {}
+  }, ms);
+}
 
 // ============================================================
 // SECTION 2: SPRITE GENERATION
@@ -827,6 +886,7 @@ class GameScene extends Phaser.Scene {
     } else {
       SFX.hit();
       this.bloods.emitParticleAt(enemy.x,enemy.y,4);
+      this.cameras.main.shake(50, 0.003);
       if(enemy.hbr) {
         const p=enemy.hp/enemy.maxhp;
         enemy.hbr.width=34*p;
@@ -842,6 +902,8 @@ class GameScene extends Phaser.Scene {
     this.bloods.emitParticleAt(enemy.x,enemy.y, big?18:12);
     this.sparks.emitParticleAt(enemy.x,enemy.y, big?14:8);
     this.whites.emitParticleAt(enemy.x,enemy.y, big?8:4);
+    this.cameras.main.shake(big?180:120, big?0.010:0.006);
+    hitStop(this, big?60:40);
     this.popup(enemy.x,enemy.y-12,enemy.pts);
     this.score+=enemy.pts;
     this.registry.set('score',this.score);
@@ -872,6 +934,7 @@ class GameScene extends Phaser.Scene {
       else player.setTint(0xffff44);
       SFX.shieldBlock();
       this.cameras.main.flash(300,0,100,255);
+      this.cameras.main.shake(100, 0.005);
       this.whites.emitParticleAt(player.x,player.y,12);
       return;
     }
@@ -881,6 +944,7 @@ class GameScene extends Phaser.Scene {
     this.registry.set('playerHP',player.hp);
     this.whites.emitParticleAt(player.x,player.y,10);
     this.cameras.main.shake(200,0.012);
+    hitStop(this, 70);
     this.dmgRect.setAlpha(0.45);
     this.tweens.add({targets:this.dmgRect,alpha:0,duration:450});
     player.setTint(0xff4444);
@@ -1136,6 +1200,10 @@ class BossScene extends Phaser.Scene {
     this.showAlert(lab+': '+bc.name, 0xff4444);
     this.cameras.main.fadeIn(400);
     this.cameras.main.shake(500, 0.005);
+
+    SFX.bossMusic.start();
+    this.events.once('shutdown', () => SFX.bossMusic.stop());
+    this.events.once('destroy',  () => SFX.bossMusic.stop());
   }
 
   showAlert(msg, col) {
@@ -1236,6 +1304,8 @@ class BossScene extends Phaser.Scene {
     if (boss.hp > 0 && boss.hp <= boss.maxhp/2 && boss.phase === 1) {
       boss.phase = 2;
       this.cameras.main.flash(300, 255, 80, 0);
+      this.cameras.main.shake(300, 0.014);
+      hitStop(this, 90);
       this.showAlert('PHASE 2', 0xff8800);
     }
 
@@ -1244,12 +1314,16 @@ class BossScene extends Phaser.Scene {
     } else {
       SFX.hit();
       this.bloods.emitParticleAt(bx, by, 4);
+      this.cameras.main.shake(60, 0.004);
+      hitStop(this, 30);
     }
   }
 
   killBoss() {
     if (this.dead) return;
     this.dead = true;
+    SFX.bossMusic.stop();
+    hitStop(this, 120);
     const b = this.boss;
     try {
       if (b && b.body) b.setVelocity(0,0);
@@ -1337,6 +1411,7 @@ class BossScene extends Phaser.Scene {
       else this.player.setTint(0xffff44);
       SFX.shieldBlock();
       this.cameras.main.flash(300,0,100,255);
+      this.cameras.main.shake(100, 0.005);
       this.whites.emitParticleAt(this.player.x, this.player.y, 12);
       return;
     }
@@ -1346,6 +1421,7 @@ class BossScene extends Phaser.Scene {
     this.registry.set('playerHP', this.player.hp);
     this.whites.emitParticleAt(this.player.x, this.player.y, 10);
     this.cameras.main.shake(200, 0.012);
+    hitStop(this, 70);
     this.dmgRect.setAlpha(0.45);
     this.tweens.add({targets:this.dmgRect, alpha:0, duration:450});
     this.player.setTint(0xff4444);
@@ -1356,6 +1432,7 @@ class BossScene extends Phaser.Scene {
   gameOver() {
     if (this.dead) return;
     this.dead = true;
+    SFX.bossMusic.stop();
     try {
       this.player.setVelocity(0,0);
       this.sparks.emitParticleAt(this.player.x,this.player.y,20);
@@ -1363,6 +1440,7 @@ class BossScene extends Phaser.Scene {
       this.fires.emitParticleAt(this.player.x,this.player.y,12);
       this.player.setVisible(false);
       this.cameras.main.shake(500, 0.02);
+      hitStop(this, 150);
     } catch (e) {}
     this.saveBest();
 
